@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+lib/
+
+# Foundry
+out/
+cache/
+cache_forge/
+broadcast/
+artifacts/
+
+# JS build output
+dist/
+build/
+
+# Environment
+.env
+.env.*
+demo-txs.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Lock files
+package-lock.json
+
+# Local
+*.md
+!README.md
+submissions/

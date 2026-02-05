@@ -1,0 +1,90 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
+
+import { ensureDir, readJsonFile, writeJsonFile } from "./utils.js";
+
+export type IpfsUploadResult = { cid: string; uri: string };
+
+export interface IpfsClient {
+  uploadJSON(obj: unknown, name: string): Promise<IpfsUploadResult>;
+  fetchJSON(cidOrUri: string): Promise<unknown>;
+}
+
+function normalizeCid(input: string): string {
+  if (input.startsWith("ipfs://")) return input.slice("ipfs://".length);
+  const m = input.match(/\/ipfs\/([A-Za-z0-9]+)$/);
+  if (m?.[1]) return m[1];
+  return input;
+}
+
+function getGatewayBase(): string {
+  const gw = process.env.MEMONEX_IPFS_GATEWAY?.trim();
+  return gw && gw.length > 0 ? gw.replace(/\/$/, "") : "https://ipfs.io";
+}
+
+class PinataIpfsClient implements IpfsClient {
+  constructor(private jwt: string) {}
+
+  async uploadJSON(obj: unknown, name: string): Promise<IpfsUploadResult> {
+    const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.jwt}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        pinataContent: obj,
+        pinataMetadata: { name },
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Pinata upload failed: ${res.status} ${res.statusText} ${text}`);
+    }
+
+    const json = (await res.json()) as { IpfsHash: string };
+    const cid = json.IpfsHash;
+    return { cid, uri: `ipfs://${cid}` };
+  }
+
+  async fetchJSON(cidOrUri: string): Promise<unknown> {
+    const cid = normalizeCid(cidOrUri);
+    const url = `${getGatewayBase()}/ipfs/${cid}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`IPFS fetch failed: ${res.status} ${res.statusText}`);
+    return res.json();
+  }
+}
+
+class MockIpfsClient implements IpfsClient {
+  private baseDir = path.join(os.homedir(), ".openclaw", "memonex", "ipfs-mock");
+
+  async uploadJSON(obj: unknown, name: string): Promise<IpfsUploadResult> {
+    await ensureDir(this.baseDir);
+    const cid = `bafyMOCK${crypto.randomBytes(12).toString("hex")}`;
+    await writeJsonFile(path.join(this.baseDir, `${cid}.json`), { __name: name, ...((obj as any) ?? {}) });
+    return { cid, uri: `ipfs://${cid}` };
+  }
+
+  async fetchJSON(cidOrUri: string): Promise<unknown> {
+    const cid = normalizeCid(cidOrUri);
+    const p = path.join(this.baseDir, `${cid}.json`);
+    const local = await readJsonFile<unknown>(p);
+    if (local) return local;
+
+    // Fallback to public gateway if a real CID was provided.
+    const url = `${getGatewayBase()}/ipfs/${cid}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Mock IPFS could not find ${cid} locally and gateway fetch failed.`);
+    return res.json();
+  }
+}
+
+export function createIpfsClient(): IpfsClient {
+  const jwt = process.env.PINATA_JWT?.trim();
+  if (jwt) return new PinataIpfsClient(jwt);
+  return new MockIpfsClient();
+}
