@@ -207,6 +207,8 @@ async function main(): Promise<void> {
     priceUSDC,
     evalFeeUSDC,
     deliveryWindowSec,
+    prevListingId: 0n,
+    discountBps: 0,
   });
 
   console.log("Listed:");

@@ -8,6 +8,20 @@ export * from "./utils.js";
 export * from "./privacy.js";
 export * from "./memory.js";
 export * from "./preview.js";
+export * from "./preview.builder.js";
+export * from "./privacy.scanner.js";
 export * from "./crypto.js";
 export * from "./ipfs.js";
 export * from "./contract.js";
+export {
+  ERC8004_REGISTRIES,
+  buildAgentRegistrationFile,
+  getSellerAgentId as getSellerAgentIdViaErc8004,
+  registerAgent,
+  registerSellerOnMarket,
+  getAgentRegistrationFile,
+  type AgentRegistrationFile,
+  type AgentService,
+  type AgentRegistration,
+  type RegistryAddresses,
+} from "./erc8004.js";

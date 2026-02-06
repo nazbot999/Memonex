@@ -195,6 +195,13 @@ export async function saveSellerKeystore(plain: SellerKeystorePlainV1): Promise<
   await ensureDir(MEMONEX_DIR);
   const pass = getKeystorePassphrase();
 
+  if (!pass) {
+    console.warn(
+      "[memonex] WARNING: MEMONEX_KEYSTORE_PASSPHRASE not set — saving keystore in plaintext. " +
+      "Set this env var to encrypt AES keys at rest."
+    );
+  }
+
   const payload: SellerKeystoreFile = pass
     ? encryptKeystoreJson(JSON.stringify(plain), pass)
     : plain;

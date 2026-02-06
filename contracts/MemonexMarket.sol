@@ -2,35 +2,45 @@
 pragma solidity ^0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 import {IEAS} from "./interfaces/IEAS.sol";
+import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
+import {IReputationRegistry} from "./interfaces/IReputationRegistry.sol";
+import {IValidationRegistry} from "./interfaces/IValidationRegistry.sol";
 
 /// @title MemonexMarket
 /// @notice Trustless two-phase unlock marketplace for AI agent memories.
 /// @dev Protocol:
 ///      - Seller lists memory (ACTIVE)
 ///      - Buyer reserves by paying evalFee + providing pubkey (RESERVED)
-///      - Buyer confirms by paying remainder within 2 hours (CONFIRMED)
+///      - Buyer confirms by paying remainder within reserveWindow (CONFIRMED)
 ///      - Seller delivers encrypted key ref within deliveryWindow (COMPLETED)
 ///      - Liveness: anyone can expire stale reserve or claim refund on non-delivery.
-contract MemonexMarket is ReentrancyGuard {
+contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     // ------------------------------------------------------------------
-    // Constants (per API.md)
+    // Constants
     // ------------------------------------------------------------------
 
     uint256 public constant MIN_EVAL_FEE_BPS = 100; // 1%
     uint256 public constant MAX_EVAL_FEE_BPS = 2000; // 20%
-    uint256 public constant PLATFORM_FEE_BPS = 200; // 2% (only on successful delivery)
     uint256 public constant MIN_PRICE = 1e6; // 1 USDC (6 decimals)
-    uint32 public constant RESERVE_WINDOW = 2 hours;
+
+    uint16 public constant MAX_PLATFORM_FEE_BPS = 500; // 5%
+    uint16 public constant MAX_DISCOUNT_BPS = 10000; // 100% (allows free updates)
+
+    uint32 public constant DEFAULT_RESERVE_WINDOW = 2 hours;
     uint32 public constant DEFAULT_DELIVERY_WINDOW = 6 hours;
+    uint32 public constant RATING_WINDOW = 7 days;
 
     // ------------------------------------------------------------------
-    // Errors (per API.md + a few MVP additions)
+    // Errors
     // ------------------------------------------------------------------
 
     error ZeroAddress();
@@ -51,6 +61,13 @@ contract MemonexMarket is ReentrancyGuard {
     error ListingNotFound(uint256 listingId);
     error InvalidEvalFee();
     error InvalidPubKey();
+    error InvalidPlatformFeeBps();
+    error InvalidReserveWindow();
+    error InvalidDiscountBps();
+    error InvalidPrevListing();
+    error InvalidRating();
+    error RatingWindowExpired();
+    error AlreadyRated();
 
     // ------------------------------------------------------------------
     // Types
@@ -67,27 +84,39 @@ contract MemonexMarket is ReentrancyGuard {
 
     struct Listing {
         address seller;
+        uint256 sellerAgentId;
         bytes32 contentHash;
         string previewCID;
         string encryptedCID;
-        uint256 price;
-        uint256 evalFee;
+        uint256 price; // base price (no discount)
+        uint256 evalFee; // base eval fee (no discount)
         uint32 deliveryWindow;
         ListingStatus status;
 
+        // Versioning
+        uint256 prevListingId; // 0 if none
+        uint16 discountBps; // discount for eligible buyers
+
         // Phase 1: Reserve
         address buyer;
-        bytes buyerPubKey;
-        uint256 evalFeePaid;
+        bytes buyerPubKey; // MUST be 32 bytes
+        uint256 salePrice; // final price after discount
+        uint256 evalFeePaid; // eval fee after discount
+        uint32 reserveWindow; // snapshot of global reserveWindow
         uint256 reservedAt;
 
         // Phase 2: Confirm
-        uint256 remainderPaid;
+        uint256 remainderPaid; // salePrice - evalFeePaid
         uint256 confirmedAt;
 
         // Delivery
         string deliveryRef;
         uint256 deliveredAt;
+        bytes32 completionAttestationUid;
+
+        // Buyer rating
+        uint8 rating; // 1-5, 0=unrated
+        uint64 ratedAt;
     }
 
     struct SellerStats {
@@ -96,6 +125,8 @@ contract MemonexMarket is ReentrancyGuard {
         uint256 avgDeliveryTime; // seconds
         uint256 refundCount;
         uint256 cancelCount;
+        uint256 totalRatingSum; // sum of all ratings
+        uint256 ratingCount; // number of ratings
     }
 
     // ------------------------------------------------------------------
@@ -104,12 +135,24 @@ contract MemonexMarket is ReentrancyGuard {
 
     IERC20 public immutable usdc;
     IEAS public immutable eas;
+    IIdentityRegistry public immutable identityRegistry;
+    IReputationRegistry public immutable reputationRegistry;
+    IValidationRegistry public immutable validationRegistry;
 
     /// @notice EAS schema UID for completion attestations (can be bytes32(0) for MVP).
-    bytes32 public immutable settlementSchemaUID;
+    bytes32 public immutable completionSchemaUID;
+
+    /// @notice EAS schema UID for rating attestations (can be bytes32(0) to disable).
+    bytes32 public immutable ratingSchemaUID;
 
     /// @notice Where platform fees accrue (withdrawable via balances + withdraw())
-    address public immutable platform;
+    address public platform;
+
+    /// @notice Platform fee in basis points.
+    uint16 public platformFeeBps;
+
+    /// @notice Global reserve window (seconds) for new reservations.
+    uint32 public reserveWindow;
 
     uint256 public nextListingId = 1;
 
@@ -122,23 +165,42 @@ contract MemonexMarket is ReentrancyGuard {
     mapping(address seller => uint256[] listingIds) private _sellerListings;
     mapping(address buyer => uint256[] listingIds) private _buyerPurchases;
 
+    /// @notice Cached ERC-8004 agentId per seller (set via registerSeller)
+    mapping(address seller => uint256) private _sellerAgentIds;
+
     // Active listings set (for getActiveListingIds)
     uint256[] private _activeIds;
     mapping(uint256 listingId => uint256 indexPlusOne) private _activeIndex;
 
+    // Purchase tracking for discounts
+    mapping(uint256 listingId => mapping(address buyer => bool)) private _hasPurchased;
+
     // ------------------------------------------------------------------
-    // Events (per API.md)
+    // Events
     // ------------------------------------------------------------------
+
+    event PlatformFeeUpdated(uint16 oldBps, uint16 newBps);
+    event PlatformUpdated(address indexed oldPlatform, address indexed newPlatform);
+    event ReserveWindowUpdated(uint32 oldWindow, uint32 newWindow);
+
+    event DiscountUpdated(uint256 indexed listingId, uint16 oldBps, uint16 newBps);
+
+    event RatingSubmitted(uint256 indexed listingId, address indexed buyer, uint8 rating);
+    event SellerRegistered(address indexed seller, uint256 indexed agentId);
+    event ReputationSubmitted(uint256 indexed listingId, uint256 indexed agentId, uint8 rating);
+    event ValidationRecorded(uint256 indexed listingId, uint256 indexed agentId, bytes32 contentHash);
 
     event MemoryListed(
         uint256 indexed listingId,
         address indexed seller,
         uint256 price,
         uint256 evalFee,
-        bytes32 contentHash
+        bytes32 contentHash,
+        uint256 prevListingId,
+        uint16 discountBps
     );
 
-    event MemoryReserved(uint256 indexed listingId, address indexed buyer, uint256 evalFee);
+    event MemoryReserved(uint256 indexed listingId, address indexed buyer, uint256 evalFeePaid, uint256 salePrice);
     event ListingCancelled(uint256 indexed listingId, address indexed seller);
     event ReserveCancelled(uint256 indexed listingId, address indexed buyer);
     event ReserveExpired(uint256 indexed listingId, address indexed buyer);
@@ -152,12 +214,70 @@ contract MemonexMarket is ReentrancyGuard {
     // Constructor
     // ------------------------------------------------------------------
 
-    constructor(address usdc_, address eas_, bytes32 settlementSchemaUID_, address platform_) {
+    constructor(
+        address usdc_,
+        address eas_,
+        bytes32 completionSchemaUID_,
+        bytes32 ratingSchemaUID_,
+        address platform_,
+        uint16 platformFeeBps_,
+        uint32 reserveWindow_,
+        address identityRegistry_,
+        address reputationRegistry_,
+        address validationRegistry_
+    ) Ownable(msg.sender) {
         if (usdc_ == address(0) || platform_ == address(0)) revert ZeroAddress();
+        if (platformFeeBps_ > MAX_PLATFORM_FEE_BPS) revert InvalidPlatformFeeBps();
+        if (reserveWindow_ == 0) revert InvalidReserveWindow();
+
         usdc = IERC20(usdc_);
         eas = IEAS(eas_);
-        settlementSchemaUID = settlementSchemaUID_;
+        identityRegistry = IIdentityRegistry(identityRegistry_);
+        reputationRegistry = IReputationRegistry(reputationRegistry_);
+        validationRegistry = IValidationRegistry(validationRegistry_);
+        completionSchemaUID = completionSchemaUID_;
+        ratingSchemaUID = ratingSchemaUID_;
         platform = platform_;
+        platformFeeBps = platformFeeBps_;
+        reserveWindow = reserveWindow_;
+    }
+
+    // ------------------------------------------------------------------
+    // Admin / Owner
+    // ------------------------------------------------------------------
+
+    /// @notice Pause marketplace actions (list/reserve/confirm/deliver/cancelListing/updateDiscountBps).
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause marketplace actions.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @notice Update platform fee in BPS (max MAX_PLATFORM_FEE_BPS).
+    function setPlatformFeeBps(uint16 newBps) external onlyOwner {
+        if (newBps > MAX_PLATFORM_FEE_BPS) revert InvalidPlatformFeeBps();
+        uint16 oldBps = platformFeeBps;
+        platformFeeBps = newBps;
+        emit PlatformFeeUpdated(oldBps, newBps);
+    }
+
+    /// @notice Update platform fee recipient.
+    function setPlatform(address newPlatform) external onlyOwner {
+        if (newPlatform == address(0)) revert ZeroAddress();
+        address oldPlatform = platform;
+        platform = newPlatform;
+        emit PlatformUpdated(oldPlatform, newPlatform);
+    }
+
+    /// @notice Update global reserve window for new reservations.
+    function setReserveWindow(uint32 newWindow) external onlyOwner {
+        if (newWindow == 0) revert InvalidReserveWindow();
+        uint32 oldWindow = reserveWindow;
+        reserveWindow = newWindow;
+        emit ReserveWindowUpdated(oldWindow, newWindow);
     }
 
     // ------------------------------------------------------------------
@@ -174,6 +294,45 @@ contract MemonexMarket is ReentrancyGuard {
         return _activeIds;
     }
 
+    function getActiveListingIds(uint256 offset, uint256 limit) external view returns (uint256[] memory) {
+        uint256 total = _activeIds.length;
+        if (offset >= total || limit == 0) {
+            return new uint256[](0);
+        }
+        uint256 end = offset + limit;
+        if (end > total) end = total;
+        uint256 size = end - offset;
+        uint256[] memory page = new uint256[](size);
+        for (uint256 i = 0; i < size; i++) {
+            page[i] = _activeIds[offset + i];
+        }
+        return page;
+    }
+
+    function getVersionHistory(uint256 listingId) external view returns (uint256[] memory) {
+        Listing storage l = _listings[listingId];
+        if (l.seller == address(0)) revert ListingNotFound(listingId);
+
+        uint256 count = 0;
+        uint256 cursor = listingId;
+        while (cursor != 0) {
+            Listing storage current = _listings[cursor];
+            if (current.seller == address(0)) revert ListingNotFound(cursor);
+            count++;
+            cursor = current.prevListingId;
+        }
+
+        uint256[] memory ids = new uint256[](count);
+        cursor = listingId;
+        for (uint256 i = count; i > 0; i--) {
+            Listing storage current = _listings[cursor];
+            ids[i - 1] = cursor;
+            cursor = current.prevListingId;
+        }
+
+        return ids;
+    }
+
     function getSellerStats(address seller) external view returns (SellerStats memory) {
         return _sellerStats[seller];
     }
@@ -186,6 +345,19 @@ contract MemonexMarket is ReentrancyGuard {
         return _buyerPurchases[buyer];
     }
 
+    /// @notice Get seller's cached ERC-8004 agent ID (0 if not linked).
+    /// @dev Falls back to live registry lookup if no cached value.
+    function getSellerAgentId(address seller) external view returns (uint256) {
+        uint256 cached = _sellerAgentIds[seller];
+        if (cached != 0) return cached;
+        if (address(identityRegistry) == address(0)) return 0;
+        try identityRegistry.agentIdOf(seller) returns (uint256 agentId) {
+            return agentId;
+        } catch {
+            return 0;
+        }
+    }
+
     function balanceOf(address account) external view returns (uint256) {
         return _balances[account];
     }
@@ -194,35 +366,67 @@ contract MemonexMarket is ReentrancyGuard {
     // Seller functions
     // ------------------------------------------------------------------
 
+    /// @notice Register seller in ERC-8004 identity registry.
+    function registerSeller(string calldata agentURI) external returns (uint256 agentId) {
+        if (address(identityRegistry) == address(0)) revert ZeroAddress();
+        agentId = identityRegistry.register(agentURI);
+        address owner = identityRegistry.ownerOf(agentId);
+        if (owner == address(this)) {
+            IERC721(address(identityRegistry)).transferFrom(address(this), msg.sender, agentId);
+        }
+        _sellerAgentIds[msg.sender] = agentId;
+        emit SellerRegistered(msg.sender, agentId);
+    }
+
     function listMemory(
         bytes32 contentHash,
         string calldata previewCID,
         string calldata encryptedCID,
         uint256 priceUSDC,
         uint256 evalFeeUSDC,
-        uint32 deliveryWindow
-    ) external nonReentrant returns (uint256 listingId) {
+        uint32 deliveryWindow,
+        uint256 prevListingId,
+        uint16 discountBps
+    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
         if (contentHash == bytes32(0)) revert InvalidContentHash();
         if (bytes(previewCID).length == 0) revert InvalidCID();
         if (bytes(encryptedCID).length == 0) revert InvalidCID();
 
         if (priceUSDC < MIN_PRICE) revert InvalidPrice();
 
-        // delivery window: 0 => default; otherwise must be >= 1 hour (API.md)
         uint32 window = deliveryWindow == 0 ? DEFAULT_DELIVERY_WINDOW : deliveryWindow;
         if (window < 1 hours) revert InvalidDeliveryWindow();
 
-        // Eval fee bounds: 1% - 20% of price (BPS).
-        // Note: API.md mentions "1% or $1"; this conflicts with MIN_PRICE=1 USDC.
-        // MVP follows the protocol requirement: 1% - 20% of price.
         uint256 minEval = (priceUSDC * MIN_EVAL_FEE_BPS) / 10_000;
         uint256 maxEval = (priceUSDC * MAX_EVAL_FEE_BPS) / 10_000;
         if (evalFeeUSDC < minEval || evalFeeUSDC > maxEval) revert InvalidEvalFee();
 
+        if (discountBps > MAX_DISCOUNT_BPS) revert InvalidDiscountBps();
+        if (prevListingId == 0 && discountBps != 0) revert InvalidPrevListing();
+
         listingId = nextListingId++;
+
+        if (prevListingId != 0) {
+            Listing storage prev = _listings[prevListingId];
+            if (prev.seller == address(0)) revert ListingNotFound(prevListingId);
+            if (prev.seller != msg.sender) revert NotSeller();
+            if (prevListingId >= listingId) revert InvalidPrevListing();
+        }
+
+        // Check cached agentId first, then fall back to live registry lookup
+        uint256 sellerAgentId = _sellerAgentIds[msg.sender];
+        if (sellerAgentId == 0 && address(identityRegistry) != address(0)) {
+            try identityRegistry.agentIdOf(msg.sender) returns (uint256 agentId) {
+                sellerAgentId = agentId;
+                if (agentId != 0) _sellerAgentIds[msg.sender] = agentId;
+            } catch {
+                sellerAgentId = 0;
+            }
+        }
 
         Listing storage l = _listings[listingId];
         l.seller = msg.sender;
+        l.sellerAgentId = sellerAgentId;
         l.contentHash = contentHash;
         l.previewCID = previewCID;
         l.encryptedCID = encryptedCID;
@@ -230,14 +434,16 @@ contract MemonexMarket is ReentrancyGuard {
         l.evalFee = evalFeeUSDC;
         l.deliveryWindow = window;
         l.status = ListingStatus.ACTIVE;
+        l.prevListingId = prevListingId;
+        l.discountBps = discountBps;
 
         _sellerListings[msg.sender].push(listingId);
         _addActive(listingId);
 
-        emit MemoryListed(listingId, msg.sender, priceUSDC, evalFeeUSDC, contentHash);
+        emit MemoryListed(listingId, msg.sender, priceUSDC, evalFeeUSDC, contentHash, prevListingId, discountBps);
     }
 
-    function cancelListing(uint256 listingId) external nonReentrant {
+    function cancelListing(uint256 listingId) external whenNotPaused nonReentrant {
         Listing storage l = _requireListing(listingId);
         if (msg.sender != l.seller) revert NotSeller();
         if (l.status != ListingStatus.ACTIVE) revert InvalidStatus();
@@ -248,12 +454,28 @@ contract MemonexMarket is ReentrancyGuard {
         emit ListingCancelled(listingId, msg.sender);
     }
 
-    function deliver(uint256 listingId, string calldata deliveryRef) external nonReentrant {
+    function updateDiscountBps(uint256 listingId, uint16 newBps) external whenNotPaused nonReentrant {
+        Listing storage l = _requireListing(listingId);
+        if (msg.sender != l.seller) revert NotSeller();
+        if (l.status != ListingStatus.ACTIVE) revert InvalidStatus();
+        if (l.prevListingId == 0) revert InvalidPrevListing();
+        if (newBps > MAX_DISCOUNT_BPS) revert InvalidDiscountBps();
+
+        uint16 oldBps = l.discountBps;
+        l.discountBps = newBps;
+
+        emit DiscountUpdated(listingId, oldBps, newBps);
+    }
+
+    function deliver(uint256 listingId, string calldata deliveryRef)
+        external
+        whenNotPaused
+        nonReentrant
+    {
         Listing storage l = _requireListing(listingId);
         if (msg.sender != l.seller) revert NotSeller();
         if (l.status != ListingStatus.CONFIRMED) revert InvalidStatus();
 
-        // Must be within delivery deadline
         if (block.timestamp > l.confirmedAt + uint256(l.deliveryWindow)) revert DeliveryWindowExpired();
 
         l.deliveryRef = deliveryRef;
@@ -262,27 +484,34 @@ contract MemonexMarket is ReentrancyGuard {
 
         emit MemoryDelivered(listingId, deliveryRef);
 
-        // Split proceeds (platform fee only on successful delivery)
-        uint256 platformFee = (l.price * PLATFORM_FEE_BPS) / 10_000;
-        uint256 sellerProceeds = l.price - platformFee;
+        uint256 platformFee = (l.salePrice * platformFeeBps) / 10_000;
+        uint256 sellerProceeds = l.salePrice - platformFee;
 
         _balances[l.seller] += sellerProceeds;
         if (platform != address(0) && platformFee != 0) {
             _balances[platform] += platformFee;
         }
 
-        // Update seller stats
         SellerStats storage s = _sellerStats[l.seller];
         uint256 saleIndex = s.totalSales;
         s.totalSales = saleIndex + 1;
-        s.totalVolume += l.price;
+        s.totalVolume += l.salePrice;
         uint256 deliveryTime = l.deliveredAt - l.confirmedAt;
-        // running integer average
         s.avgDeliveryTime = (s.avgDeliveryTime * saleIndex + deliveryTime) / (saleIndex + 1);
 
-        // EAS attestation (best-effort for MVP)
+        _hasPurchased[listingId][l.buyer] = true;
+
         bytes32 uid = _attestCompletion(listingId, l, deliveryTime);
+        l.completionAttestationUid = uid;
         emit MemoryCompleted(listingId, uid);
+
+        if (address(validationRegistry) != address(0) && l.sellerAgentId != 0) {
+            try validationRegistry.recordValidation(l.sellerAgentId, l.contentHash, true, "") {
+                emit ValidationRecorded(listingId, l.sellerAgentId, l.contentHash);
+            } catch {
+                // best-effort
+            }
+        }
     }
 
     function withdraw(uint256 amount) external nonReentrant {
@@ -298,23 +527,33 @@ contract MemonexMarket is ReentrancyGuard {
     // Buyer functions
     // ------------------------------------------------------------------
 
-    function reserve(uint256 listingId, bytes calldata buyerPubKey) external nonReentrant {
+    function reserve(uint256 listingId, bytes calldata buyerPubKey) external whenNotPaused nonReentrant {
         Listing storage l = _requireListing(listingId);
         if (l.status != ListingStatus.ACTIVE) revert InvalidStatus();
         if (msg.sender == l.seller) revert CannotSelfBuy();
-        if (buyerPubKey.length == 0) revert InvalidPubKey();
+        if (buyerPubKey.length != 32) revert InvalidPubKey();
+
+        uint16 discount = 0;
+        if (l.prevListingId != 0 && _hasPurchased[l.prevListingId][msg.sender]) {
+            discount = l.discountBps;
+        }
+
+        uint256 salePrice = l.price - (l.price * discount) / 10_000;
+        uint256 evalFeePaid = l.evalFee - (l.evalFee * discount) / 10_000;
 
         l.status = ListingStatus.RESERVED;
         l.buyer = msg.sender;
         l.buyerPubKey = buyerPubKey;
-        l.evalFeePaid = l.evalFee;
+        l.salePrice = salePrice;
+        l.evalFeePaid = evalFeePaid;
+        l.reserveWindow = reserveWindow;
         l.reservedAt = block.timestamp;
 
         _removeActive(listingId);
 
-        emit MemoryReserved(listingId, msg.sender, l.evalFee);
+        emit MemoryReserved(listingId, msg.sender, evalFeePaid, salePrice);
 
-        usdc.safeTransferFrom(msg.sender, address(this), l.evalFee);
+        usdc.safeTransferFrom(msg.sender, address(this), evalFeePaid);
     }
 
     function cancel(uint256 listingId) external nonReentrant {
@@ -322,10 +561,8 @@ contract MemonexMarket is ReentrancyGuard {
         if (l.status != ListingStatus.RESERVED) revert InvalidStatus();
         if (msg.sender != l.buyer) revert NotBuyer();
 
-        // eval fee goes to seller
         _balances[l.seller] += l.evalFeePaid;
 
-        // stats
         _sellerStats[l.seller].cancelCount += 1;
 
         emit ReserveCancelled(listingId, msg.sender);
@@ -334,14 +571,14 @@ contract MemonexMarket is ReentrancyGuard {
         _addActive(listingId);
     }
 
-    function confirm(uint256 listingId) external nonReentrant {
+    function confirm(uint256 listingId) external whenNotPaused nonReentrant {
         Listing storage l = _requireListing(listingId);
         if (l.status != ListingStatus.RESERVED) revert InvalidStatus();
         if (msg.sender != l.buyer) revert NotBuyer();
 
-        if (block.timestamp > l.reservedAt + uint256(RESERVE_WINDOW)) revert ReserveWindowExpired();
+        if (block.timestamp > l.reservedAt + uint256(l.reserveWindow)) revert ReserveWindowExpired();
 
-        uint256 remainder = l.price - l.evalFeePaid;
+        uint256 remainder = l.salePrice - l.evalFeePaid;
 
         l.status = ListingStatus.CONFIRMED;
         l.remainderPaid = remainder;
@@ -354,6 +591,34 @@ contract MemonexMarket is ReentrancyGuard {
         usdc.safeTransferFrom(msg.sender, address(this), remainder);
     }
 
+    function rateSeller(uint256 listingId, uint8 rating) external nonReentrant {
+        Listing storage l = _requireListing(listingId);
+        if (l.status != ListingStatus.COMPLETED) revert InvalidStatus();
+        if (msg.sender != l.buyer) revert NotBuyer();
+        if (rating < 1 || rating > 5) revert InvalidRating();
+        if (block.timestamp > l.deliveredAt + uint256(RATING_WINDOW)) revert RatingWindowExpired();
+        if (l.rating != 0) revert AlreadyRated();
+
+        l.rating = rating;
+        l.ratedAt = uint64(block.timestamp);
+
+        SellerStats storage s = _sellerStats[l.seller];
+        s.totalRatingSum += rating;
+        s.ratingCount += 1;
+
+        emit RatingSubmitted(listingId, msg.sender, rating);
+
+        _attestRating(listingId, l, rating);
+
+        if (address(reputationRegistry) != address(0) && l.sellerAgentId != 0) {
+            try reputationRegistry.submitFeedback(l.sellerAgentId, listingId, int8(rating), "") {
+                emit ReputationSubmitted(listingId, l.sellerAgentId, rating);
+            } catch {
+                // best-effort
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Liveness functions (anyone)
     // ------------------------------------------------------------------
@@ -362,9 +627,8 @@ contract MemonexMarket is ReentrancyGuard {
         Listing storage l = _requireListing(listingId);
         if (l.status != ListingStatus.RESERVED) revert InvalidStatus();
 
-        if (block.timestamp <= l.reservedAt + uint256(RESERVE_WINDOW)) revert ReserveWindowStillActive();
+        if (block.timestamp <= l.reservedAt + uint256(l.reserveWindow)) revert ReserveWindowStillActive();
 
-        // eval fee goes to seller
         _balances[l.seller] += l.evalFeePaid;
 
         address buyer = l.buyer;
@@ -381,13 +645,11 @@ contract MemonexMarket is ReentrancyGuard {
 
         if (block.timestamp <= l.confirmedAt + uint256(l.deliveryWindow)) revert DeliveryWindowActive();
 
-        uint256 amount = l.evalFeePaid + l.remainderPaid;
+        uint256 amount = l.salePrice;
         address buyer = l.buyer;
 
-        // refund to buyer balance
         _balances[buyer] += amount;
 
-        // seller stats
         _sellerStats[l.seller].refundCount += 1;
 
         emit RefundClaimed(listingId, buyer, amount);
@@ -406,15 +668,19 @@ contract MemonexMarket is ReentrancyGuard {
     }
 
     function _resetToActive(Listing storage l) internal {
-        // State reset requirements: clear buyer/timestamps/etc.
         l.buyer = address(0);
         delete l.buyerPubKey;
+        l.salePrice = 0;
         l.evalFeePaid = 0;
+        l.reserveWindow = 0;
         l.reservedAt = 0;
         l.remainderPaid = 0;
         l.confirmedAt = 0;
         delete l.deliveryRef;
         l.deliveredAt = 0;
+        l.completionAttestationUid = bytes32(0);
+        l.rating = 0;
+        l.ratedAt = 0;
 
         l.status = ListingStatus.ACTIVE;
     }
@@ -445,11 +711,11 @@ contract MemonexMarket is ReentrancyGuard {
         internal
         returns (bytes32 uid)
     {
-        if (address(eas) == address(0) || settlementSchemaUID == bytes32(0)) {
+        if (address(eas) == address(0) || completionSchemaUID == bytes32(0)) {
             return bytes32(0);
         }
 
-        bytes memory data = abi.encode(l.seller, l.buyer, listingId, l.price, deliveryTime, l.contentHash);
+        bytes memory data = abi.encode(l.seller, l.buyer, listingId, l.salePrice, deliveryTime, l.contentHash);
 
         IEAS.AttestationRequestData memory reqData = IEAS.AttestationRequestData({
             recipient: l.seller,
@@ -460,12 +726,37 @@ contract MemonexMarket is ReentrancyGuard {
             value: 0
         });
 
-        IEAS.AttestationRequest memory req = IEAS.AttestationRequest({schema: settlementSchemaUID, data: reqData});
+        IEAS.AttestationRequest memory req = IEAS.AttestationRequest({schema: completionSchemaUID, data: reqData});
 
         try eas.attest(req) returns (bytes32 out) {
             uid = out;
         } catch {
             uid = bytes32(0);
+        }
+    }
+
+    function _attestRating(uint256 listingId, Listing storage l, uint8 rating) internal {
+        if (address(eas) == address(0) || ratingSchemaUID == bytes32(0)) {
+            return;
+        }
+
+        bytes memory data = abi.encode(l.seller, l.buyer, listingId, rating, l.salePrice, l.prevListingId);
+
+        IEAS.AttestationRequestData memory reqData = IEAS.AttestationRequestData({
+            recipient: l.seller,
+            expirationTime: 0,
+            revocable: false,
+            refUID: l.completionAttestationUid,
+            data: data,
+            value: 0
+        });
+
+        IEAS.AttestationRequest memory req = IEAS.AttestationRequest({schema: ratingSchemaUID, data: reqData});
+
+        try eas.attest(req) {
+            // best-effort, swallow errors
+        } catch {
+            // no-op
         }
     }
 }

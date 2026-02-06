@@ -82,7 +82,7 @@ export function generatePreview(params: {
   const previewBase = {
     schema: "memonex.preview.v1" as const,
     listing: {
-      chain: "base-sepolia" as const,
+      chain: memoryPackage.seller.chain,
       market: params.market,
       contentHash: params.contentHash,
       priceUSDC: params.priceUSDC.toString(),

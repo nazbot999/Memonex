@@ -3,6 +3,8 @@ import type { Address, Hex } from "viem";
 export type IsoDateTimeString = string;
 export type Base64String = string;
 
+export type MemonexNetwork = "base-sepolia" | "base";
+
 export type ExtractionSource =
   | { kind: "openclaw-memory"; limit?: number }
   | { kind: "files"; include: string[]; exclude?: string[] };
@@ -63,6 +65,32 @@ export type PrivacyReport = {
   leakageRiskScore: number; // 0..1
 };
 
+/** A single item flagged by the privacy scanner */
+export type PrivacyFlag = {
+  id: string;
+  kind: "secret" | "pii" | "high-risk";
+  pattern: string; // What was detected (e.g., "API key pattern")
+  location: string; // Which insight/section it was found in
+  snippet: string; // The flagged content (partially masked)
+  action: "REDACT" | "KEEP"; // Current action
+  overridden: boolean; // Whether the seller manually changed the action
+};
+
+/** Privacy review result with seller overrides */
+export type PrivacyReview = {
+  flags: PrivacyFlag[];
+  summary: {
+    totalFlagged: number;
+    redacted: number;
+    kept: number;
+    overridden: number;
+  };
+  leakageRiskScore: number; // 0-1, adjusted based on overrides
+  reviewedBy: "auto" | "human" | "agent";
+  reviewedAt: string;
+  approved: boolean;
+};
+
 export type MemoryPackage = {
   schema: "memonex.memorypackage.v1";
   packageId: string;
@@ -75,7 +103,7 @@ export type MemoryPackage = {
   seller: {
     agentName: string;
     agentVersion?: string;
-    chain: "base-sepolia";
+    chain: MemonexNetwork;
     sellerAddress: Address;
   };
   extraction: {
@@ -109,10 +137,88 @@ export type MemoryPackage = {
   };
 };
 
+/** Public preview — visible to everyone for free */
+export type PublicPreview = {
+  schema: "memonex.publicpreview.v1";
+  title: string;
+  description: string;
+  topics: string[];
+  audience: "agent" | "developer" | "trader" | "founder";
+  price: string; // USDC amount
+  evalFeePct: number; // eval fee percentage
+  deliveryWindowSec: number;
+  seller: {
+    address: Address;
+    agentId?: number; // ERC-8004 agentId if registered
+    agentName?: string;
+  };
+  // Basic stats only
+  stats: {
+    insightCount: number;
+    createdAt: string;
+  };
+  integrity: {
+    contentHash: Hex;
+  };
+};
+
+/** Eval preview — unlocked after paying eval fee (Phase 1) */
+export type EvalPreview = {
+  schema: "memonex.evalpreview.v1";
+  // Everything in public preview plus:
+  publicPreview: PublicPreview;
+  // Detailed content
+  teaserSnippets: Array<{
+    snippetId: string;
+    type: "decision" | "fact" | "playbook" | "heuristic" | "warning";
+    text: string; // Actual teaser content
+    redactions: string[]; // What was redacted from this snippet
+  }>;
+  qualityMetrics: {
+    noveltyScore: number; // 0-1
+    specificityScore: number; // 0-1
+    tokenEstimate: number;
+    leakageRiskScore: number; // 0-1
+    lastUpdated: string;
+  };
+  contentSummary: {
+    totalInsights: number;
+    playbooks: number;
+    checklists: number;
+    decisionTrees: number;
+    warnings: number;
+    heuristics: number;
+  };
+  acquisitionContext?: {
+    acquiredDuring: {
+      start: string;
+      end?: string;
+      label?: string;
+    };
+    macroContext?: {
+      fearGreed?: { value: number; classification: string };
+      marketRegime?: { regime: string };
+      keyEvents?: Array<{ title: string; category: string }>;
+    };
+    decay?: {
+      model: "linear";
+      decayDays: number;
+      floorPct: number;
+    };
+  };
+  integrity: {
+    previewKeccak256: Hex;
+    commitsToContentHash: true;
+  };
+};
+
+/**
+ * @deprecated Use {@link PublicPreview} and {@link EvalPreview}.
+ */
 export type PreviewPackage = {
   schema: "memonex.preview.v1";
   listing: {
-    chain: "base-sepolia";
+    chain: MemonexNetwork;
     market: Address;
     contentHash: Hex;
     priceUSDC: string;
@@ -209,3 +315,49 @@ export type SellerKeystoreEncryptedV1 = {
 };
 
 export type SellerKeystoreFile = SellerKeystorePlainV1 | SellerKeystoreEncryptedV1;
+
+export enum ListingStatus {
+  ACTIVE = 0,
+  RESERVED = 1,
+  CONFIRMED = 2,
+  COMPLETED = 3,
+  CANCELLED = 4,
+  REFUNDED = 5,
+}
+
+export type ListingTupleV2 = {
+  seller: Address;
+  sellerAgentId: bigint;
+  contentHash: Hex;
+  previewCID: string;
+  encryptedCID: string;
+  price: bigint;
+  evalFee: bigint;
+  deliveryWindow: number;
+  status: number;
+  prevListingId: bigint;
+  discountBps: number;
+  buyer: Address;
+  buyerPubKey: Hex;
+  salePrice: bigint;
+  evalFeePaid: bigint;
+  reserveWindow: number;
+  reservedAt: bigint;
+  remainderPaid: bigint;
+  confirmedAt: bigint;
+  deliveryRef: string;
+  deliveredAt: bigint;
+  completionAttestationUid: Hex;
+  rating: number;
+  ratedAt: bigint;
+};
+
+export type SellerStatsV2 = {
+  totalSales: bigint;
+  totalVolume: bigint;
+  avgDeliveryTime: bigint;
+  refundCount: bigint;
+  cancelCount: bigint;
+  totalRatingSum: bigint;
+  ratingCount: bigint;
+};

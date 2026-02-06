@@ -86,5 +86,9 @@ class MockIpfsClient implements IpfsClient {
 export function createIpfsClient(): IpfsClient {
   const jwt = process.env.PINATA_JWT?.trim();
   if (jwt) return new PinataIpfsClient(jwt);
+  console.warn(
+    "[memonex] WARNING: PINATA_JWT not set — using local mock IPFS. " +
+    "Uploads are stored locally and not available on the IPFS network."
+  );
   return new MockIpfsClient();
 }

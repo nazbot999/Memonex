@@ -12,8 +12,14 @@ import {MemonexMarket} from "../contracts/MemonexMarket.sol";
 ///   PRIVATE_KEY (required)
 ///   USDC_ADDRESS (optional)
 ///   EAS_ADDRESS (optional)
-///   SCHEMA_UID (optional)
+///   COMPLETION_SCHEMA_UID (optional)
+///   RATING_SCHEMA_UID (optional)
 ///   PLATFORM_ADDRESS (optional)
+///   PLATFORM_FEE_BPS (optional)
+///   RESERVE_WINDOW (optional)
+///   IDENTITY_REGISTRY (optional)
+///   REPUTATION_REGISTRY (optional)
+///   VALIDATION_REGISTRY (optional)
 contract Deploy is Script {
     // Base Sepolia defaults
     address internal constant BASE_SEPOLIA_USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
@@ -25,11 +31,28 @@ contract Deploy is Script {
 
         address usdc = vm.envOr("USDC_ADDRESS", BASE_SEPOLIA_USDC);
         address eas = vm.envOr("EAS_ADDRESS", BASE_SEPOLIA_EAS);
-        bytes32 schema = vm.envOr("SCHEMA_UID", bytes32(0));
+        bytes32 completionSchema = vm.envOr("COMPLETION_SCHEMA_UID", bytes32(0));
+        bytes32 ratingSchema = vm.envOr("RATING_SCHEMA_UID", bytes32(0));
         address platform = vm.envOr("PLATFORM_ADDRESS", deployer);
+        uint16 platformFeeBps = uint16(vm.envOr("PLATFORM_FEE_BPS", uint256(200)));
+        uint32 reserveWindow = uint32(vm.envOr("RESERVE_WINDOW", uint256(2 hours)));
+        address identityRegistry = vm.envOr("IDENTITY_REGISTRY", address(0));
+        address reputationRegistry = vm.envOr("REPUTATION_REGISTRY", address(0));
+        address validationRegistry = vm.envOr("VALIDATION_REGISTRY", address(0));
 
         vm.startBroadcast(pk);
-        market = new MemonexMarket(usdc, eas, schema, platform);
+        market = new MemonexMarket(
+            usdc,
+            eas,
+            completionSchema,
+            ratingSchema,
+            platform,
+            platformFeeBps,
+            reserveWindow,
+            identityRegistry,
+            reputationRegistry,
+            validationRegistry
+        );
         vm.stopBroadcast();
     }
 }

@@ -63,7 +63,8 @@ export async function extractRawItems(spec: ExtractionSpec): Promise<RawItem[]> 
         const abs = path.isAbsolute(m) ? m : path.resolve(process.cwd(), m);
         if (isDeniedPath(abs)) continue;
         // Limit file size to keep the demo responsive.
-        const st = await fs.stat(abs);
+        const st = await fs.lstat(abs);
+        if (!st.isFile()) continue;
         if (st.size > 512 * 1024) continue;
         const text = await fs.readFile(abs, "utf8");
         out.push({
@@ -158,8 +159,13 @@ export function buildMemoryPackage(params: {
   audience?: MemoryPackage["audience"];
   insights: Insight[];
   redactionSummary: MemoryPackage["redactions"]["summary"];
+  network?: MemoryPackage["seller"]["chain"];
 }): MemoryPackage {
   const createdAt = nowIso();
+  const envNetwork = process.env.MEMONEX_NETWORK?.trim();
+  const network = params.network
+    ?? (envNetwork === "base" ? "base" : "base-sepolia");
+
   const pkg: MemoryPackage = {
     schema: "memonex.memorypackage.v1",
     packageId: crypto.randomUUID(),
@@ -172,7 +178,7 @@ export function buildMemoryPackage(params: {
     seller: {
       agentName: process.env.MEMONEX_AGENT_NAME ?? "OpenClaw",
       agentVersion: process.env.MEMONEX_AGENT_VERSION,
-      chain: "base-sepolia",
+      chain: network,
       sellerAddress: params.sellerAddress,
     },
     extraction: {
