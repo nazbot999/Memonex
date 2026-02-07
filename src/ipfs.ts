@@ -24,6 +24,53 @@ function getGatewayBase(): string {
   return gw && gw.length > 0 ? gw.replace(/\/$/, "") : "https://ipfs.io";
 }
 
+const DEFAULT_RELAY_URL = "https://memonex-ipfs.memonex.workers.dev";
+
+function getRelayUrl(): string {
+  const url = process.env.MEMONEX_RELAY_URL?.trim();
+  return (url && url.length > 0 ? url : DEFAULT_RELAY_URL).replace(/\/$/, "");
+}
+
+// ---------------------------------------------------------------------------
+// Relay client — proxies through the Memonex Cloudflare Worker
+// ---------------------------------------------------------------------------
+
+class RelayIpfsClient implements IpfsClient {
+  constructor(private relayUrl: string) {}
+
+  async uploadJSON(obj: unknown, name: string): Promise<IpfsUploadResult> {
+    const res = await fetch(`${this.relayUrl}/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: obj, name }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Relay upload failed: ${res.status} ${text}`);
+    }
+
+    const json = (await res.json()) as { cid: string; uri: string };
+    return { cid: json.cid, uri: json.uri };
+  }
+
+  async fetchJSON(cidOrUri: string): Promise<unknown> {
+    const cid = normalizeCid(cidOrUri);
+    // Try relay's gateway proxy first
+    const relayRes = await fetch(`${this.relayUrl}/ipfs/${cid}`).catch(() => null);
+    if (relayRes?.ok) return relayRes.json();
+    // Fallback to public gateway
+    const url = `${getGatewayBase()}/ipfs/${cid}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`IPFS fetch failed: ${res.status} ${res.statusText}`);
+    return res.json();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Direct Pinata client — user provides their own PINATA_JWT
+// ---------------------------------------------------------------------------
+
 class PinataIpfsClient implements IpfsClient {
   constructor(private jwt: string) {}
 
@@ -59,6 +106,10 @@ class PinataIpfsClient implements IpfsClient {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Local mock — zero config, works out of the box
+// ---------------------------------------------------------------------------
+
 class MockIpfsClient implements IpfsClient {
   private baseDir = path.join(os.homedir(), ".openclaw", "memonex", "ipfs-mock");
 
@@ -83,12 +134,20 @@ class MockIpfsClient implements IpfsClient {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Factory — picks the best available client
+//
+// Priority: user's own Pinata key → relay proxy → local mock
+// ---------------------------------------------------------------------------
+
 export function createIpfsClient(): IpfsClient {
+  // 1. User has their own Pinata key — use it directly (fastest, no middleman)
   const jwt = process.env.PINATA_JWT?.trim();
   if (jwt) return new PinataIpfsClient(jwt);
-  console.warn(
-    "[memonex] WARNING: PINATA_JWT not set — using local mock IPFS. " +
-    "Uploads are stored locally and not available on the IPFS network."
-  );
-  return new MockIpfsClient();
+
+  // 2. Relay proxy — default for all users, no config needed
+  //    Uses the shared Memonex Cloudflare Worker backed by Pinata.
+  //    Override with MEMONEX_RELAY_URL env var if self-hosting.
+  const relayUrl = getRelayUrl();
+  return new RelayIpfsClient(relayUrl);
 }

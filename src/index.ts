@@ -13,6 +13,9 @@ export * from "./privacy.scanner.js";
 export * from "./crypto.js";
 export * from "./ipfs.js";
 export * from "./contract.js";
+export * from "./gateway.js";
+export * from "./import.scanner.js";
+export * from "./import.js";
 export {
   ERC8004_REGISTRIES,
   buildAgentRegistrationFile,

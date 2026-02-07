@@ -5,8 +5,9 @@ import crypto from "node:crypto";
 import fg from "fast-glob";
 import type { Address } from "viem";
 
-import type { ExtractionSpec, Insight, MemoryPackage, RawItem } from "./types.js";
+import type { ExtractionSource, ExtractionSpec, Insight, MemoryPackage, RawItem } from "./types.js";
 import { nowIso } from "./utils.js";
+import { createGatewayClient } from "./gateway.js";
 
 const HARD_DENY_BASENAMES = new Set([
   "SOUL.md",
@@ -79,22 +80,100 @@ export async function extractRawItems(spec: ExtractionSpec): Promise<RawItem[]> 
     }
 
     if (src.kind === "openclaw-memory") {
-      // MVP adapter: read an exported memory file if available.
-      // Real OpenClaw integration would call `memory_recall` tool.
-      const exported = process.env.MEMONEX_MEMORY_FILE;
-      const fallbackPath = path.join(os.homedir(), ".openclaw", "memonex", "demo-memory.txt");
-      const p = exported ?? fallbackPath;
+      const ocSrc = src as Extract<ExtractionSource, { kind: "openclaw-memory" }>;
+
+      // 1. Read workspace/memory/*.md files
+      const workspaceDir = process.env.OPENCLAW_WORKSPACE
+        ?? path.join(os.homedir(), ".openclaw", "workspace");
+      const memoryDir = path.join(workspaceDir, "memory");
+
       try {
-        const text = await fs.readFile(p, "utf8");
-        out.push({
-          id: `raw:memory:${crypto.randomUUID()}`,
-          kind: "memory",
-          source: { kind: "openclaw-memory", ref: p },
-          timestamp: nowIso(),
-          text,
-        });
+        const memFiles = await fg("*.md", { cwd: memoryDir, onlyFiles: true });
+        for (const file of memFiles) {
+          // Skip memonex imports to avoid circular re-export
+          if (file.startsWith("memonex/") || file.startsWith("memonex\\")) continue;
+
+          const abs = path.join(memoryDir, file);
+
+          // TimeRange filter: parse YYYY-MM-DD from filename
+          if (spec.timeRange) {
+            const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+            if (dateMatch) {
+              const fileDate = dateMatch[1];
+              if (spec.timeRange.since && fileDate < spec.timeRange.since.slice(0, 10)) continue;
+              if (spec.timeRange.until && fileDate > spec.timeRange.until.slice(0, 10)) continue;
+            }
+          }
+
+          const st = await fs.lstat(abs);
+          if (!st.isFile()) continue;
+          if (st.size > 512 * 1024) continue;
+          const text = await fs.readFile(abs, "utf8");
+          out.push({
+            id: `raw:ocmem:${crypto.randomUUID()}`,
+            kind: "memory",
+            source: { kind: "openclaw-memory", ref: abs },
+            timestamp: new Date(st.mtimeMs).toISOString(),
+            text,
+          });
+        }
       } catch {
-        // ignore if not present
+        // workspace/memory dir may not exist yet
+      }
+
+      // 2. Optionally include MEMORY.md (opt-in only)
+      if (ocSrc.includeCurated) {
+        const memoryMdPath = path.join(workspaceDir, "MEMORY.md");
+        try {
+          const text = await fs.readFile(memoryMdPath, "utf8");
+          out.push({
+            id: `raw:ocmem:${crypto.randomUUID()}`,
+            kind: "memory",
+            source: { kind: "openclaw-memory", ref: memoryMdPath },
+            timestamp: nowIso(),
+            text,
+          });
+        } catch {
+          // MEMORY.md may not exist
+        }
+      }
+
+      // 3. Query memory via Gateway API (works with LanceDB or core plugin)
+      if (spec.query) {
+        try {
+          const gateway = await createGatewayClient();
+          if (gateway?.available) {
+            const results = await gateway.memoryQuery(spec.query, ocSrc.limit ?? 20);
+            for (const r of results) {
+              out.push({
+                id: `raw:gateway:${crypto.randomUUID()}`,
+                kind: "memory",
+                source: { kind: "openclaw-memory", ref: "gateway-query" },
+                timestamp: nowIso(),
+                text: r.text,
+              });
+            }
+          }
+        } catch {
+          // Gateway unavailable — filesystem extraction still works
+        }
+      }
+
+      // 4. Fallback: legacy MEMONEX_MEMORY_FILE env var (backwards compat)
+      const exported = process.env.MEMONEX_MEMORY_FILE;
+      if (exported) {
+        try {
+          const text = await fs.readFile(exported, "utf8");
+          out.push({
+            id: `raw:ocmem:${crypto.randomUUID()}`,
+            kind: "memory",
+            source: { kind: "openclaw-memory", ref: exported },
+            timestamp: nowIso(),
+            text,
+          });
+        } catch {
+          // ignore if not present
+        }
       }
     }
   }

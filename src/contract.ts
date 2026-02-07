@@ -20,7 +20,7 @@ import type { ListingTupleV2, SellerStatsV2 } from "./types.js";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 
-export const MEMONEX_MARKET = "0x5b2FE0ed5Bef889e588FD16511E52aD9169917D1" as const satisfies Address;
+export const MEMONEX_MARKET = "0x4507789a434d51480a22900D789CDcef43509603" as const satisfies Address;
 export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const satisfies Address;
 export const EAS_BASE_SEPOLIA = "0x4200000000000000000000000000000000000021" as const satisfies Address;
 
@@ -402,11 +402,12 @@ export async function listMemory(params: {
 
 export async function reserve(params: { clients: Clients; listingId: bigint; buyerPubKey: Uint8Array }): Promise<Hex> {
   const listing = await getListing({ clients: params.clients, listingId: params.listingId });
+  const approvalAmount = listing.price; // approve total upfront to cover reserve + confirm
   await ensureUsdcAllowance({
     clients: params.clients,
     owner: params.clients.address,
     spender: MEMONEX_MARKET,
-    amount: listing.evalFee,
+    amount: approvalAmount,
   });
 
   const txHash = await params.clients.walletClient.writeContract({

@@ -32,7 +32,16 @@ Thumbs.db
 # Lock files
 package-lock.json
 
-# Local
+# Markdown (keep README and SKILL.md only)
 *.md
 !README.md
+!skill/SKILL.md
+
+# Worker (internal infrastructure, already deployed)
+worker/
+
+# Web build artifacts
+web/.next/
+
+# Local
 submissions/

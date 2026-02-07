@@ -6,7 +6,7 @@ export type Base64String = string;
 export type MemonexNetwork = "base-sepolia" | "base";
 
 export type ExtractionSource =
-  | { kind: "openclaw-memory"; limit?: number }
+  | { kind: "openclaw-memory"; limit?: number; includeCurated?: boolean }
   | { kind: "files"; include: string[]; exclude?: string[] };
 
 export type ExtractionSpec = {
@@ -360,4 +360,96 @@ export type SellerStatsV2 = {
   cancelCount: bigint;
   totalRatingSum: bigint;
   ratingCount: bigint;
+};
+
+// ---------------------------------------------------------------------------
+// Gateway
+// ---------------------------------------------------------------------------
+
+export type GatewayConfig = {
+  baseUrl: string;
+  authToken: string;
+};
+
+// ---------------------------------------------------------------------------
+// Import safety scanner
+// ---------------------------------------------------------------------------
+
+export type ThreatLevel = "info" | "warning" | "danger";
+
+export type ImportThreatFlag = {
+  id: string;
+  level: ThreatLevel;
+  category: "prompt-injection" | "data-exfiltration" | "behavioral-manipulation" | "suspicious-content";
+  pattern: string;
+  location: string;
+  snippet: string;
+  action: "BLOCK" | "WARN" | "PASS";
+  overridden: boolean;
+};
+
+export type ImportSafetyReport = {
+  flags: ImportThreatFlag[];
+  summary: {
+    totalFlagged: number;
+    blocked: number;
+    warned: number;
+    passed: number;
+    overridden: number;
+    insightsRemoved: number;
+  };
+  threatScore: number;
+  safeToImport: boolean;
+  reviewedBy: "auto" | "human" | "agent";
+  reviewedAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// Import
+// ---------------------------------------------------------------------------
+
+export type ImportOptions = {
+  listingId?: bigint;
+  purchasePrice?: string;
+  sellerAddress?: Address;
+  skipIntegrityCheck?: boolean;
+  skipLanceDB?: boolean;
+  skipSafetyScan?: boolean;
+  forceImport?: boolean;
+  workspacePath?: string;
+  importDir?: string;
+};
+
+export type ImportResult = {
+  success: boolean;
+  packageId: string;
+  markdownPath: string;
+  insightsImported: number;
+  insightsBlocked: number;
+  lanceDbStored: number;
+  integrityVerified: boolean;
+  safetyReport: ImportSafetyReport;
+  warnings: string[];
+};
+
+export type ImportRecord = {
+  packageId: string;
+  listingId?: string;
+  title: string;
+  topics: string[];
+  sellerAddress?: string;
+  sellerAgentName?: string;
+  purchasePrice?: string;
+  insightCount: number;
+  importedAt: string;
+  markdownPath: string;
+  lanceDbStored: number;
+  contentHash?: string;
+  integrityVerified: boolean;
+  license: { terms: string; allowedUse: string[]; prohibitedUse: string[] };
+};
+
+export type ImportRegistry = {
+  version: 1;
+  records: ImportRecord[];
 };

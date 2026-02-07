@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 
 import dotenv from "dotenv";
-import type { Hex } from "viem";
+import { encodeFunctionData, toHex, type Hex } from "viem";
+import { baseSepolia } from "viem/chains";
 
 import type { ExtractionSpec, KeyCapsuleV1, MemoryPackage } from "./types.js";
 import {
   MEMONEX_MARKET,
+  MEMONEX_MARKET_ABI,
   createClients,
   formatUsdc,
   getListing,
@@ -38,10 +38,9 @@ import {
 import {
   computeCanonicalKeccak256,
   computeSha256HexUtf8,
-  ensureDir,
   nowIso,
-  writeJsonFile,
 } from "./utils.js";
+import { importMemoryPackage } from "./import.js";
 
 // Load .env from current directory, parent, or explicit DOTENV_PATH
 import { existsSync } from "node:fs";
@@ -236,6 +235,26 @@ async function main(): Promise<void> {
   // Wait for RPC propagation (Base Sepolia public RPC is load-balanced)
   await new Promise(r => setTimeout(r, 5000));
 
+  console.log("Attempting self-buy (should revert)…");
+  try {
+    const selfBuyTx = await seller.walletClient.sendTransaction({
+      chain: baseSepolia,
+      to: MEMONEX_MARKET,
+      data: encodeFunctionData({
+        abi: MEMONEX_MARKET_ABI,
+        functionName: "reserve",
+        args: [listed.listingId, toHex(buyerKeypair.publicKey)],
+      }),
+      gas: 400000n,
+    });
+
+    const receipt = await seller.publicClient.waitForTransactionReceipt({ hash: selfBuyTx });
+    console.log("  self-buy tx:", selfBuyTx, "status:", receipt.status);
+  } catch (err) {
+    console.log("  self-buy attempt failed (expected revert)");
+    console.log(err);
+  }
+
   console.log("Reserving…");
   const reserveTx = await reserve({
     clients: buyer,
@@ -277,11 +296,22 @@ async function main(): Promise<void> {
     status: "DELIVERED",
   });
 
+  // Wait for RPC propagation before reading updated deliveryRef
+  let l = await getListing({ clients: buyer, listingId: listed.listingId });
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    if (l.deliveryRef && l.deliveryRef.length > 0) break;
+    await new Promise(r => setTimeout(r, 3000));
+    l = await getListing({ clients: buyer, listingId: listed.listingId });
+  }
+
+  if (!l.deliveryRef || l.deliveryRef.length === 0) {
+    throw new Error("Delivery ref not visible yet (RPC lag). Try again shortly.");
+  }
+
   // -----------------------------
   // 8) Buyer fetches delivery + decrypts
   // -----------------------------
   console.log("Buyer fetching listing + decrypting…");
-  const l = await getListing({ clients: buyer, listingId: listed.listingId });
 
   const capsuleJson = (await ipfs.fetchJSON(l.deliveryRef)) as KeyCapsuleV1;
   const keyMaterialPt = openKeyCapsule({ capsule: capsuleJson, recipientSecretKey: buyerKeypair.secretKey });
@@ -296,16 +326,28 @@ async function main(): Promise<void> {
   const imported = JSON.parse(decryptedJson) as MemoryPackage;
 
   // -----------------------------
-  // 9) Import (save locally)
+  // 9) Import into OpenClaw memory system (with safety scan)
   // -----------------------------
-  const outDir = path.join(os.homedir(), ".openclaw", "memonex", "imported");
-  await ensureDir(outDir);
+  const importResult = await importMemoryPackage(imported, {
+    listingId: listed.listingId,
+    purchasePrice: formatUsdc(priceUSDC),
+    sellerAddress: seller.address,
+  });
 
-  const outPath = path.join(outDir, `${imported.packageId}.json`);
-  await writeJsonFile(outPath, imported);
+  console.log("Safety scan:");
+  console.log("  threat score:", importResult.safetyReport.threatScore.toFixed(2));
+  console.log("  safe to import:", importResult.safetyReport.safeToImport);
+  console.log("  threats flagged:", importResult.safetyReport.summary.totalFlagged);
+  console.log("  insights blocked:", importResult.insightsBlocked);
 
-  console.log("Imported memory package written:");
-  console.log("  ", outPath);
+  console.log("Import result:");
+  console.log("  markdown:", importResult.markdownPath);
+  console.log("  insights imported:", importResult.insightsImported);
+  console.log("  LanceDB stored:", importResult.lanceDbStored);
+  console.log("  integrity verified:", importResult.integrityVerified);
+  if (importResult.warnings.length > 0) {
+    console.log("  warnings:", importResult.warnings);
+  }
 
   const rec = await findSellerKeyRecordByContentHash(contentHash);
   if (rec) {
