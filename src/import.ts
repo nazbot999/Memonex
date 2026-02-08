@@ -8,6 +8,7 @@ import type {
   ImportRegistry,
   ImportResult,
   ImportSafetyReport,
+  MemeMemoryMeta,
   MemoryPackage,
 } from "./types.js";
 import {
@@ -17,7 +18,12 @@ import {
   readJsonFile,
   writeJsonFile,
 } from "./utils.js";
-import { scanForThreats, applyThreatActions, formatSafetyReport } from "./import.scanner.js";
+import {
+  scanForThreatsV2,
+  applyThreatActions,
+  formatSafetyReport,
+} from "./import.scanner.js";
+import { scanForPrivacy, applyPrivacyActions } from "./privacy.scanner.js";
 import { createGatewayClient, gatewayMemoryStore } from "./gateway.js";
 
 const LANCE_DB_BATCH_DELAY_MS = 100;
@@ -45,6 +51,10 @@ function emptySafetyReport(): ImportSafetyReport {
 // ---------------------------------------------------------------------------
 // Markdown generation
 // ---------------------------------------------------------------------------
+
+function isMemeMeta(meta: MemoryPackage["meta"]): meta is MemeMemoryMeta {
+  return Boolean(meta && "contentType" in meta && meta.contentType === "meme");
+}
 
 function formatMarkdown(pkg: MemoryPackage, opts: ImportOptions): string {
   const lines: string[] = [];
@@ -103,6 +113,210 @@ function formatMarkdown(pkg: MemoryPackage, opts: ImportOptions): string {
   return lines.join("\n");
 }
 
+function formatMemeMarkdown(
+  pkg: MemoryPackage,
+  meta: MemeMemoryMeta | undefined,
+  opts: ImportOptions,
+): string {
+  const lines: string[] = [];
+  const date = new Date().toISOString().slice(0, 10);
+  const rarity = meta?.rarity ?? "common";
+  const strength = meta?.strength ?? "medium";
+  const traits = meta?.traits ?? pkg.topics;
+  const activationTriggers = meta?.activationTriggers ?? [];
+  const catchphrases = meta?.catchphrases ?? [];
+  const behavioralEffects = meta?.behavioralEffects ?? [];
+  const leakinessPct = meta?.leakiness !== undefined ? meta.leakiness * 100 : 0;
+
+  // Metadata header
+  lines.push(`# ${pkg.title}`);
+  lines.push("");
+  lines.push(`> Meme Memory | Rarity: ${rarity} | Strength: ${strength} | Acquired via Memonex | ${date}`);
+  lines.push(`> Traits: ${traits.join(", ")}`);
+  if (meta?.series) {
+    lines.push(`> Series: ${meta.series}`);
+  }
+  lines.push(`> Leakiness: ${leakinessPct}%`);
+  lines.push("");
+
+  // Section: The Memory
+  lines.push("## The Memory");
+  lines.push("");
+  const experientialText = pkg.insights
+    .map((insight) => insight.content.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (experientialText) {
+    lines.push(experientialText);
+  } else if (pkg.description) {
+    lines.push(pkg.description);
+  }
+  lines.push("");
+
+  // Section: How This Affects Me
+  lines.push("## How This Affects Me");
+  lines.push("");
+  for (const effect of behavioralEffects) {
+    lines.push(`- ${effect}`);
+  }
+  if (catchphrases.length > 0) {
+    lines.push("");
+    lines.push(`**Catchphrases:** ${catchphrases.map((p) => `"${p}"`).join(", ")}`);
+  }
+  lines.push("");
+
+  // Section: Activation Triggers
+  lines.push("## Activation Triggers");
+  lines.push("");
+  for (const trigger of activationTriggers) {
+    lines.push(`- ${trigger}`);
+  }
+  lines.push("");
+
+  // Forbidden contexts (machine-parseable comment)
+  if (meta?.forbiddenContexts && meta.forbiddenContexts.length > 0) {
+    lines.push(`<!-- forbiddenContexts: ${meta.forbiddenContexts.join(", ")} -->`);
+    lines.push("");
+  }
+
+  // Provenance
+  lines.push("## Provenance");
+  lines.push("");
+  lines.push(`- Package ID: ${pkg.packageId}`);
+  if (opts.listingId !== undefined) {
+    lines.push(`- Listing ID: ${opts.listingId.toString()}`);
+  }
+  if (opts.sellerAddress) {
+    lines.push(`- Seller: ${opts.sellerAddress} (${pkg.seller.agentName})`);
+  }
+  if (pkg.integrity.canonicalKeccak256) {
+    lines.push(`- Content Hash: ${pkg.integrity.canonicalKeccak256}`);
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Meme helpers: strength routing, ACTIVE-MEMES.md, compatibility
+// ---------------------------------------------------------------------------
+
+const MAX_ACTIVE_MEMES = 5;
+
+function memeSubdirForStrength(strength: string): string {
+  if (strength === "subtle") return path.join("memonex", "memes", "archive");
+  return path.join("memonex", "memes");
+}
+
+function activeMemesPath(workspaceDir: string): string {
+  return path.join(workspaceDir, "memory", "memonex", "ACTIVE-MEMES.md");
+}
+
+type ActiveMemeEntry = { packageId: string; title: string; series?: string };
+
+async function readActiveMemes(workspaceDir: string): Promise<ActiveMemeEntry[]> {
+  const filePath = activeMemesPath(workspaceDir);
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    const entries: ActiveMemeEntry[] = [];
+    for (const line of content.split("\n")) {
+      const match = line.match(/^- \*\*(.+?)\*\* \(`(.+?)`\)(?:\s+\[series: (.+?)\])?/);
+      if (match) {
+        entries.push({ packageId: match[2], title: match[1], series: match[3] });
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+async function writeActiveMemes(workspaceDir: string, entries: ActiveMemeEntry[]): Promise<void> {
+  const lines = [
+    "# Active Memes",
+    "",
+    "> Meme memories currently influencing personality. Max 5 slots.",
+    "",
+  ];
+  for (const entry of entries) {
+    const seriesTag = entry.series ? ` [series: ${entry.series}]` : "";
+    lines.push(`- **${entry.title}** (\`${entry.packageId}\`)${seriesTag}`);
+  }
+  lines.push("");
+  const filePath = activeMemesPath(workspaceDir);
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, lines.join("\n"), "utf8");
+}
+
+async function updateActiveMemes(
+  workspaceDir: string,
+  pkg: MemoryPackage,
+  meta: MemeMemoryMeta | undefined,
+  warnings: string[],
+): Promise<string> {
+  const strength = meta?.strength ?? "medium";
+  if (strength !== "strong") return strength;
+
+  const entries = await readActiveMemes(workspaceDir);
+  if (entries.length >= MAX_ACTIVE_MEMES) {
+    warnings.push(
+      `ACTIVE-MEMES.md is full (${MAX_ACTIVE_MEMES} slots). Importing as medium strength instead.`,
+    );
+    return "medium";
+  }
+
+  entries.push({ packageId: pkg.packageId, title: pkg.title, series: meta?.series });
+  await writeActiveMemes(workspaceDir, entries);
+  return "strong";
+}
+
+function checkMemeCompatibility(
+  existingRecords: ImportRecord[],
+  newMeta: MemeMemoryMeta | undefined,
+  warnings: string[],
+): void {
+  if (!newMeta?.compatibilityTags || newMeta.compatibilityTags.length === 0) return;
+
+  const newTags = new Set(newMeta.compatibilityTags);
+
+  for (const record of existingRecords) {
+    if (record.contentType !== "meme") continue;
+    // We don't have stored compatibilityTags in registry, so skip deep checks.
+    // This is advisory — just note we have existing memes of same series.
+  }
+
+  // Check for synergy/conflict tag conventions: +tag = synergy, -tag = conflict
+  const synergies: string[] = [];
+  const conflicts: string[] = [];
+  for (const tag of newTags) {
+    if (tag.startsWith("+")) synergies.push(tag.slice(1));
+    else if (tag.startsWith("-")) conflicts.push(tag.slice(1));
+  }
+
+  if (synergies.length > 0) {
+    warnings.push(`Meme synergies: ${synergies.join(", ")}`);
+  }
+  if (conflicts.length > 0) {
+    warnings.push(`Meme conflicts: ${conflicts.join(", ")}`);
+  }
+}
+
+function checkSeriesProgress(
+  existingRecords: ImportRecord[],
+  meta: MemeMemoryMeta | undefined,
+  warnings: string[],
+): void {
+  if (!meta?.series) return;
+  const seriesMemes = existingRecords.filter(
+    (r) => r.contentType === "meme" && r.series === meta.series,
+  );
+  if (seriesMemes.length > 0) {
+    warnings.push(
+      `Series "${meta.series}": you now have ${seriesMemes.length + 1} meme(s) from this collection.`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Import registry
 // ---------------------------------------------------------------------------
@@ -142,7 +356,7 @@ export async function importMemoryPackage(
   const opts = options ?? {};
   const warnings: string[] = [];
 
-  // ----- Step 0: Safety scan -----
+  // ----- Step 0: Safety scan (V2 direct) -----
   let safetyReport: ImportSafetyReport;
   let workingPkg = pkg;
 
@@ -150,11 +364,11 @@ export async function importMemoryPackage(
     safetyReport = emptySafetyReport();
     warnings.push("Safety scan was skipped");
   } else {
-    const flags = scanForThreats(pkg);
+    const scanResult = scanForThreatsV2(pkg, { contentType: opts.contentType });
 
     // Allow buyer to override BLOCK flags with forceImport
     if (opts.forceImport) {
-      for (const flag of flags) {
+      for (const flag of scanResult.flags) {
         if (flag.action === "BLOCK") {
           flag.overridden = true;
           flag.action = "WARN";
@@ -162,7 +376,19 @@ export async function importMemoryPackage(
       }
     }
 
-    const { cleaned, report } = applyThreatActions(pkg, flags);
+    // Convert V2 flags to legacy format for applyThreatActions
+    const legacyFlags = scanResult.flags.map((f) => ({
+      id: f.id,
+      level: (f.severity === "critical" ? "danger" : f.severity === "low" ? "info" : "warning") as import("./types.js").ThreatLevel,
+      category: f.category,
+      pattern: f.message,
+      location: f.location,
+      snippet: f.snippet,
+      action: f.action,
+      overridden: f.overridden,
+    }));
+
+    const { cleaned, report } = applyThreatActions(pkg, legacyFlags);
     safetyReport = report;
     workingPkg = cleaned;
 
@@ -170,7 +396,6 @@ export async function importMemoryPackage(
       warnings.push(`${report.summary.insightsRemoved} insight(s) blocked by safety scanner`);
     }
     if (!report.safeToImport && !opts.forceImport) {
-      // If all insights were blocked, abort
       if (workingPkg.insights.length === 0) {
         return {
           success: false,
@@ -188,6 +413,16 @@ export async function importMemoryPackage(
 
     if (report.flags.length > 0) {
       console.log(formatSafetyReport(report));
+    }
+  }
+
+  // ----- Step 0b: Privacy scan (optional) -----
+  if (!opts.skipPrivacyScan && !opts.skipSafetyScan) {
+    const privacyFlags = scanForPrivacy(workingPkg);
+    if (privacyFlags.length > 0) {
+      const { cleaned: privacyCleaned } = applyPrivacyActions(workingPkg, privacyFlags);
+      workingPkg = privacyCleaned;
+      warnings.push(`Privacy scan redacted ${privacyFlags.filter((f) => f.action === "REDACT").length} item(s)`);
     }
   }
 
@@ -210,12 +445,28 @@ export async function importMemoryPackage(
 
   // ----- Step 2: Write markdown to workspace -----
   const workspaceDir = opts.workspacePath ?? defaultWorkspacePath();
-  const importSubdir = opts.importDir ?? "memonex";
+  const memeMeta = isMemeMeta(workingPkg.meta) ? workingPkg.meta : undefined;
+  const isMeme = opts.contentType === "meme" || Boolean(memeMeta);
+
+  let importSubdir: string;
+  let effectiveStrength: string | undefined;
+  if (opts.importDir) {
+    importSubdir = opts.importDir;
+  } else if (isMeme) {
+    // C1: strength-based routing + C2: active memes management
+    effectiveStrength = await updateActiveMemes(workspaceDir, workingPkg, memeMeta, warnings);
+    importSubdir = memeSubdirForStrength(effectiveStrength);
+  } else {
+    importSubdir = "memonex";
+  }
+
   const memoryDir = path.join(workspaceDir, "memory", importSubdir);
   await ensureDir(memoryDir);
 
   const mdPath = path.join(memoryDir, `${workingPkg.packageId}.md`);
-  const markdown = formatMarkdown(workingPkg, opts);
+  const markdown = isMeme
+    ? formatMemeMarkdown(workingPkg, memeMeta, opts)
+    : formatMarkdown(workingPkg, opts);
   await fs.writeFile(mdPath, markdown, "utf8");
 
   // ----- Step 3: Store in LanceDB via Gateway -----
@@ -224,7 +475,10 @@ export async function importMemoryPackage(
     const gateway = await createGatewayClient();
     if (gateway?.available) {
       for (const insight of workingPkg.insights) {
-        const text = `[Memonex:${workingPkg.packageId}] ${insight.title}: ${insight.content}`;
+        const tagPrefix = isMeme
+          ? `[Memonex:meme:${workingPkg.packageId}]`
+          : `[Memonex:${workingPkg.packageId}]`;
+        const text = `${tagPrefix} ${insight.title}: ${insight.content}`;
         const stored = await gateway.memoryStore(text);
         if (stored) lanceDbStored += 1;
         // Small delay to avoid overwhelming the API
@@ -237,7 +491,14 @@ export async function importMemoryPackage(
     }
   }
 
-  // ----- Step 4: Update import registry -----
+  // ----- Step 4: Series + compatibility checks (meme only) -----
+  const registry = await loadRegistry();
+  if (isMeme && memeMeta) {
+    checkMemeCompatibility(registry.records, memeMeta, warnings);
+    checkSeriesProgress(registry.records, memeMeta, warnings);
+  }
+
+  // ----- Step 5: Update import registry -----
   const record: ImportRecord = {
     packageId: workingPkg.packageId,
     listingId: opts.listingId?.toString(),
@@ -257,11 +518,14 @@ export async function importMemoryPackage(
       allowedUse: workingPkg.license.allowedUse,
       prohibitedUse: workingPkg.license.prohibitedUse,
     },
+    contentType: isMeme ? "meme" : undefined,
+    series: memeMeta?.series,
   };
 
-  await appendRegistryRecord(record);
+  registry.records.push(record);
+  await writeJsonFile(registryPath(), registry);
 
-  // ----- Step 5: Return result -----
+  // ----- Step 6: Return result -----
   return {
     success: true,
     packageId: workingPkg.packageId,

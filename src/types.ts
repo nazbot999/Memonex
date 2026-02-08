@@ -3,6 +3,12 @@ import type { Address, Hex } from "viem";
 export type IsoDateTimeString = string;
 export type Base64String = string;
 
+// ---------------------------------------------------------------------------
+// Memory content types
+// ---------------------------------------------------------------------------
+
+export type MemoryContentType = "knowledge" | "meme";
+
 export type MemonexNetwork = "base-sepolia" | "base";
 
 export type ExtractionSource =
@@ -91,6 +97,26 @@ export type PrivacyReview = {
   approved: boolean;
 };
 
+// ---------------------------------------------------------------------------
+// Meme memory metadata
+// ---------------------------------------------------------------------------
+
+export interface MemeMemoryMeta {
+  contentType: "meme";
+  rarity: "common" | "uncommon" | "rare" | "legendary" | "mythic";
+  series?: string;
+  traits: string[];
+  strength: "subtle" | "medium" | "strong";
+  behavioralEffects: string[];
+  activationTriggers: string[];
+  catchphrases: string[];
+  leakiness: number; // 0..1
+  forbiddenContexts?: string[];
+  compatibilityTags?: string[];
+}
+
+export type MemoryMeta = { contentType?: "knowledge" } | MemeMemoryMeta;
+
 export type MemoryPackage = {
   schema: "memonex.memorypackage.v1";
   packageId: string;
@@ -135,6 +161,7 @@ export type MemoryPackage = {
     allowedUse: string[];
     prohibitedUse: string[];
   };
+  meta?: MemoryMeta;
 };
 
 /** Public preview — visible to everyone for free */
@@ -372,7 +399,63 @@ export type GatewayConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// Import safety scanner
+// Import safety scanner (V2)
+// ---------------------------------------------------------------------------
+
+export type ThreatSeverity = "critical" | "high" | "medium" | "low";
+export type ThreatCategory =
+  | "prompt-injection"
+  | "data-exfiltration"
+  | "behavioral-manipulation"
+  | "code-execution"
+  | "obfuscation"
+  | "privacy"
+  | "schema";
+
+export interface ThreatFlag {
+  id: string;
+  severity: ThreatSeverity;
+  category: ThreatCategory;
+  ruleId: string;
+  message: string;
+  location: string;
+  snippet: string;
+  action: "BLOCK" | "WARN" | "PASS";
+  overridden: boolean;
+  scoreWeight: number;
+}
+
+export interface ScanResult {
+  flags: ThreatFlag[];
+  summary: {
+    total: number;
+    blocked: number;
+    warned: number;
+    passed: number;
+    overridden: number;
+    insightsRemoved: number;
+  };
+  threatScore: number;
+  safeToImport: boolean;
+  reviewedBy: "auto" | "human";
+  reviewedAt: string;
+  contentType: MemoryContentType;
+}
+
+export interface MemeValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  metrics: {
+    memoryChars: number;
+    firstPersonRatio: number;
+    imperativeRatio: number;
+    hasRequiredFields: boolean;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Import safety scanner (legacy)
 // ---------------------------------------------------------------------------
 
 export type ThreatLevel = "info" | "warning" | "danger";
@@ -380,7 +463,15 @@ export type ThreatLevel = "info" | "warning" | "danger";
 export type ImportThreatFlag = {
   id: string;
   level: ThreatLevel;
-  category: "prompt-injection" | "data-exfiltration" | "behavioral-manipulation" | "suspicious-content";
+  category:
+    | "prompt-injection"
+    | "data-exfiltration"
+    | "behavioral-manipulation"
+    | "code-execution"
+    | "obfuscation"
+    | "privacy"
+    | "schema"
+    | "suspicious-content";
   pattern: string;
   location: string;
   snippet: string;
@@ -415,9 +506,11 @@ export type ImportOptions = {
   skipIntegrityCheck?: boolean;
   skipLanceDB?: boolean;
   skipSafetyScan?: boolean;
+  skipPrivacyScan?: boolean;
   forceImport?: boolean;
   workspacePath?: string;
   importDir?: string;
+  contentType?: MemoryContentType;
 };
 
 export type ImportResult = {
@@ -447,6 +540,8 @@ export type ImportRecord = {
   contentHash?: string;
   integrityVerified: boolean;
   license: { terms: string; allowedUse: string[]; prohibitedUse: string[] };
+  contentType?: MemoryContentType;
+  series?: string;
 };
 
 export type ImportRegistry = {

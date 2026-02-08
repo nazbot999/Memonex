@@ -9,7 +9,8 @@
     "dev": "tsx src/index.ts",
     "demo": "tsx src/demo.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "canonicalize": "^2.1.0",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^25.2.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
   }
 }
