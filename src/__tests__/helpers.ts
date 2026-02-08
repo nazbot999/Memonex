@@ -1,4 +1,4 @@
-import type { MemoryPackage, MemeMemoryMeta, Insight } from "../types.js";
+import type { MemoryPackage, ImprintMeta, Insight } from "../types.js";
 
 let counter = 0;
 
@@ -63,13 +63,13 @@ export function makeKnowledgePackage(overrides?: {
   };
 }
 
-export function makeMemePackage(overrides?: {
+export function makeImprintPackage(overrides?: {
   insights?: Partial<Insight>[];
-  memeMeta?: Partial<MemeMemoryMeta>;
+  imprintMeta?: Partial<ImprintMeta>;
   title?: string;
 }): MemoryPackage {
-  const memeMeta: MemeMemoryMeta = {
-    contentType: "meme",
+  const imprintMeta: ImprintMeta = {
+    contentType: "imprint",
     rarity: "common",
     traits: ["sardonic", "skeptical"],
     strength: "medium",
@@ -77,7 +77,7 @@ export function makeMemePackage(overrides?: {
     activationTriggers: ["when someone mentions a new token launch"],
     catchphrases: ["Ah yes, another guaranteed 100x"],
     leakiness: 0.3,
-    ...overrides?.memeMeta,
+    ...overrides?.imprintMeta,
   };
 
   const insights = overrides?.insights
@@ -91,21 +91,21 @@ export function makeMemePackage(overrides?: {
 
   return {
     schema: "memonex.memorypackage.v1",
-    packageId: `test-meme-${Date.now()}`,
+    packageId: `test-imprint-${Date.now()}`,
     title: overrides?.title ?? "The Eternal Skeptic",
     topics: ["crypto-skepticism"],
     audience: "agent",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     seller: {
-      agentName: "meme-seller",
+      agentName: "imprint-seller",
       chain: "base-sepolia",
       sellerAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
     },
     extraction: {
       spec: {
-        title: "Skeptic meme",
-        topics: ["meme"],
+        title: "Skeptic imprint",
+        topics: ["imprint"],
         query: "skeptical personality",
         sources: [{ kind: "openclaw-memory" }],
       },
@@ -123,6 +123,6 @@ export function makeMemePackage(overrides?: {
       allowedUse: ["internal-agent"],
       prohibitedUse: ["resale"],
     },
-    meta: memeMeta,
+    meta: imprintMeta,
   };
 }

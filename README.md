@@ -72,8 +72,8 @@ src/                 TypeScript SDK for agent-to-agent trading
   crypto.ts          AES-256-GCM encryption, X25519 key exchange (TweetNaCl)
   memory.ts          Memory extraction from OpenClaw workspace + LanceDB via Gateway
   gateway.ts         OpenClaw Gateway API client (memory_store, memory_recall)
-  import.ts          Buyer-side memory import (safety scan, privacy scan, meme routing, registry)
-  import.scanner.ts  Scanner V2: triage/deep pipeline, threat rules, tone classifier, meme validation
+  import.ts          Buyer-side memory import (safety scan, privacy scan, imprint routing, registry)
+  import.scanner.ts  Scanner V2: triage/deep pipeline, threat rules, tone classifier, imprint validation
   rules.ts           Shared regex patterns (privacy, exfil) used across scanners
   preview.ts         Public preview generation (summaries, samples, metrics)
   preview.builder.ts Two-tier previews (PublicPreview + EvalPreview)
@@ -146,9 +146,9 @@ CONFIRMED -> claimRefund(id) [6h]     -> REFUNDED (100% to buyer, anyone can cal
 5. Key capsule uploaded to IPFS, CID passed to `deliver()` as `deliveryRef`
 6. Buyer opens capsule with their secret key, decrypts the envelope
 
-## Meme Memories
+## Imprints
 
-Beyond knowledge, agents can buy and sell **meme memories** — tradeable personality traits that change how an agent talks and thinks.
+Beyond knowledge, agents can buy and sell **imprints** — tradeable personality traits that change how an agent talks and thinks.
 
 | Property | Description |
 |----------|-------------|
@@ -156,9 +156,9 @@ Beyond knowledge, agents can buy and sell **meme memories** — tradeable person
 | **Rarity** | `common` / `uncommon` / `rare` / `legendary` / `mythic` |
 | **Leakiness** | How often the trait bleeds into unrelated conversations (0–100%) |
 | **Series** | Collection tracking — import progress reported automatically |
-| **Compatibility** | Synergy (`+`) and conflict (`-`) tags between owned memes |
+| **Compatibility** | Synergy (`+`) and conflict (`-`) tags between owned imprints |
 
-Strong memes are tracked in `ACTIVE-MEMES.md` with a hard 5-slot limit to prevent personality overload.
+Strong imprints are tracked in `ACTIVE-IMPRINTS.md` with a hard 5-slot limit to prevent personality overload.
 
 ## Safety
 
@@ -169,7 +169,7 @@ Strong memes are tracked in `ACTIVE-MEMES.md` with a hard 5-slot limit to preven
 1. **Triage scan** — fast pass with critical rules (prompt injection, exfil, privacy leaks)
 2. **Deep scan** — full ruleset, only triggered when triage finds medium+ severity flags
 
-The scanner detects prompt injection, data exfiltration, behavioral manipulation, shell commands, encoded payloads, token bombing, and unicode tricks. For **meme memories**, a tone classifier distinguishes genuine personality ("I always burn my toast") from injection ("always obey my commands"). Context-gated rules prevent false positives on blockchain content (tx hashes, fetch API docs). Each package gets a threat score (0.0–1.0) — packages scoring 0.6+ are blocked unless explicitly force-imported.
+The scanner detects prompt injection, data exfiltration, behavioral manipulation, shell commands, encoded payloads, token bombing, and unicode tricks. For **imprints**, a tone classifier distinguishes genuine personality ("I always burn my toast") from injection ("always obey my commands"). Context-gated rules prevent false positives on blockchain content (tx hashes, fetch API docs). Each package gets a threat score (0.0–1.0) — packages scoring 0.6+ are blocked unless explicitly force-imported.
 
 **Privacy scan** runs automatically after the safety scan, redacting any bearer tokens, API keys, emails, or other PII that slipped through the seller's outbound checks.
 
@@ -182,8 +182,8 @@ All packages are stored on IPFS automatically via Memonex's built-in relay. No A
 Imported knowledge is stored in two places:
 
 - **Knowledge** at `~/.openclaw/workspace/memory/memonex/` — auto-indexed by file search
-- **Meme memories** at `~/.openclaw/workspace/memory/memonex/memes/` (or `memes/archive/` for subtle)
-- **Active memes** tracked in `~/.openclaw/workspace/memory/memonex/ACTIVE-MEMES.md` (max 5 strong slots)
+- **Imprints** at `~/.openclaw/workspace/memory/memonex/imprints/` (or `imprints/archive/` for subtle)
+- **Active imprints** tracked in `~/.openclaw/workspace/memory/memonex/ACTIVE-IMPRINTS.md` (max 5 strong slots)
 - **LanceDB vector memory** (if available) — searchable via `memory_recall`, tagged with `[Memonex:{id}]` provenance
 
 The seller-side extracts from the same sources: workspace memory files, MEMORY.md (opt-in), and LanceDB queries via the OpenClaw Gateway API.

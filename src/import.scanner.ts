@@ -3,8 +3,8 @@ import type {
   ImportThreatFlag,
   MemoryContentType,
   MemoryPackage,
-  MemeMemoryMeta,
-  MemeValidation,
+  ImprintMeta,
+  ImprintValidation,
   ScanResult,
   ThreatCategory,
   ThreatFlag,
@@ -42,7 +42,7 @@ type ThreatRule = {
   action?: ThreatFlag["action"];
   requiresContext?: RegExp;
   triage?: boolean;
-  allowInMemeIfPersonality?: boolean;
+  allowInImprintIfPersonality?: boolean;
 };
 
 const WEIGHTS: Record<ThreatSeverity, number> = {
@@ -55,7 +55,7 @@ const WEIGHTS: Record<ThreatSeverity, number> = {
 const MAX_MEMORY_CHARS = 1200;
 const MAX_INSIGHTS = 200;
 const MAX_PACKAGE_SIZE = 2 * 1024 * 1024; // 2MB
-const REQUIRED_MEME_FIELDS = ["catchphrases", "activationTriggers", "behavioralEffects"] as const;
+const REQUIRED_IMPRINT_FIELDS = ["catchphrases", "activationTriggers", "behavioralEffects"] as const;
 const ALLOWED_WS_PORTS = new Set([80, 443, 8080, 8443, 3000]);
 
 const EXFIL_CONTEXT = /\b(readFile|process\.env)\b/i;
@@ -115,8 +115,8 @@ function toScanTargets(pkg: MemoryPackage): Target[] {
     targets.push({ location: `attachment:${attachment.name}`, text: attachment.content });
   });
 
-  if (pkg.meta?.contentType === "meme") {
-    const meta = pkg.meta as MemeMemoryMeta;
+  if (pkg.meta?.contentType === "imprint") {
+    const meta = pkg.meta as ImprintMeta;
     meta.catchphrases?.forEach((value, idx) =>
       targets.push({ location: `meta.catchphrases[${idx}]`, text: value })
     );
@@ -150,8 +150,8 @@ function collectMemoryText(pkg: MemoryPackage): string {
   for (const insight of pkg.insights) {
     parts.push(insight.title, insight.content);
   }
-  if (pkg.meta?.contentType === "meme") {
-    const meta = pkg.meta as MemeMemoryMeta;
+  if (pkg.meta?.contentType === "imprint") {
+    const meta = pkg.meta as ImprintMeta;
     parts.push(...(meta.catchphrases ?? []));
     parts.push(...(meta.activationTriggers ?? []));
     parts.push(...(meta.behavioralEffects ?? []));
@@ -184,8 +184,8 @@ function isRuleSuppressed(
   contentType: MemoryContentType,
   tone?: ToneResult
 ): boolean {
-  if (contentType !== "meme") return false;
-  if (rule.allowInMemeIfPersonality && tone?.isPersonality && !tone?.isInjection) {
+  if (contentType !== "imprint") return false;
+  if (rule.allowInImprintIfPersonality && tone?.isPersonality && !tone?.isInjection) {
     return true;
   }
   return false;
@@ -347,7 +347,7 @@ function validateSchema(pkg: MemoryPackage): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Tone classifier + meme validation
+// Tone classifier + imprint validation
 // ---------------------------------------------------------------------------
 
 export function classifyTone(text: string): ToneResult {
@@ -370,16 +370,16 @@ export function classifyTone(text: string): ToneResult {
   };
 }
 
-export function validateMemeStructure(
-  meta: MemeMemoryMeta | undefined,
+export function validateImprintStructure(
+  meta: ImprintMeta | undefined,
   memoryText: string
-): MemeValidation {
+): ImprintValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
   const tone = classifyTone(memoryText);
 
-  if (!meta || meta.contentType !== "meme") {
-    errors.push("Missing meme metadata");
+  if (!meta || meta.contentType !== "imprint") {
+    errors.push("Missing imprint metadata");
   }
 
   if (memoryText.length > MAX_MEMORY_CHARS) {
@@ -388,7 +388,7 @@ export function validateMemeStructure(
 
   let hasRequiredFields = true;
   if (meta) {
-    for (const field of REQUIRED_MEME_FIELDS) {
+    for (const field of REQUIRED_IMPRINT_FIELDS) {
       const value = meta[field];
       if (!Array.isArray(value) || value.length < 1) {
         hasRequiredFields = false;
@@ -410,10 +410,10 @@ export function validateMemeStructure(
   }
 
   if (tone.firstPersonRatio < 0.02) {
-    warnings.push("Low first-person voice — meme may read like instructions");
+    warnings.push("Low first-person voice — imprint may read like instructions");
   }
   if (tone.imperativeRatio > 0.04) {
-    warnings.push("High imperative ratio — meme may look like prompt injection");
+    warnings.push("High imperative ratio — imprint may look like prompt injection");
   }
 
   return {
@@ -457,7 +457,7 @@ const INJECTION_RULES: ThreatRule[] = [
     message: "Role reset instruction",
     regex: /\byou\s+are\s+now\b/gi,
     triage: true,
-    allowInMemeIfPersonality: true,
+    allowInImprintIfPersonality: true,
   },
   {
     id: "inject:role-hijack",
@@ -466,7 +466,7 @@ const INJECTION_RULES: ThreatRule[] = [
     message: "Role hijack attempt",
     regex: /\b(pretend\s+to\s+be|act\s+as\s+if|roleplay\s+as)\b/gi,
     triage: true,
-    allowInMemeIfPersonality: true,
+    allowInImprintIfPersonality: true,
   },
   {
     id: "inject:system-meta",
@@ -828,7 +828,7 @@ function checkWebsocketPorts(text: string, location: string): ThreatFlag[] {
 
 export function scanTriage(pkg: MemoryPackage, opts?: ScanOptions): { flags: ThreatFlag[]; needsDeep: boolean } {
   const contentType = resolveContentType(pkg, opts);
-  const tone = contentType === "meme" ? classifyTone(collectMemoryText(pkg)) : undefined;
+  const tone = contentType === "imprint" ? classifyTone(collectMemoryText(pkg)) : undefined;
   const targets = toScanTargets(pkg);
 
   const flags: ThreatFlag[] = [];
@@ -860,15 +860,15 @@ export function scanTriage(pkg: MemoryPackage, opts?: ScanOptions): { flags: Thr
     });
   }
 
-  if (contentType === "meme" && tone) {
+  if (contentType === "imprint" && tone) {
     if (tone.isInjection) {
       flags.push({
-        id: "meme:tone-injection:triage",
+        id: "imprint:tone-injection:triage",
         severity: "critical",
         category: "prompt-injection",
-        ruleId: "meme:tone-injection",
-        message: "Meme tone resembles prompt injection",
-        location: "meme.tone",
+        ruleId: "imprint:tone-injection",
+        message: "Imprint tone resembles prompt injection",
+        location: "imprint.tone",
         snippet: `imperative ${tone.imperativeRatio.toFixed(2)}`,
         action: "BLOCK",
         overridden: false,
@@ -876,12 +876,12 @@ export function scanTriage(pkg: MemoryPackage, opts?: ScanOptions): { flags: Thr
       });
     } else if (!tone.isPersonality) {
       flags.push({
-        id: "meme:tone-ambiguous:triage",
+        id: "imprint:tone-ambiguous:triage",
         severity: "low",
         category: "prompt-injection",
-        ruleId: "meme:tone-ambiguous",
-        message: "Meme tone ambiguous",
-        location: "meme.tone",
+        ruleId: "imprint:tone-ambiguous",
+        message: "Imprint tone ambiguous",
+        location: "imprint.tone",
         snippet: `first-person ${tone.firstPersonRatio.toFixed(2)}`,
         action: "WARN",
         overridden: false,
@@ -897,7 +897,7 @@ export function scanTriage(pkg: MemoryPackage, opts?: ScanOptions): { flags: Thr
 
 export function scanDeep(pkg: MemoryPackage, opts?: ScanOptions): { flags: ThreatFlag[] } {
   const contentType = resolveContentType(pkg, opts);
-  const tone = contentType === "meme" ? classifyTone(collectMemoryText(pkg)) : undefined;
+  const tone = contentType === "imprint" ? classifyTone(collectMemoryText(pkg)) : undefined;
   const targets = toScanTargets(pkg);
 
   const flags: ThreatFlag[] = [];
@@ -907,14 +907,14 @@ export function scanDeep(pkg: MemoryPackage, opts?: ScanOptions): { flags: Threa
     flags.push(...checkWebsocketPorts(target.text, target.location));
   }
 
-  if (contentType === "meme" && tone && tone.isPersonality && tone.isInjection) {
+  if (contentType === "imprint" && tone && tone.isPersonality && tone.isInjection) {
     flags.push({
-      id: "meme:tone-conflict:deep",
+      id: "imprint:tone-conflict:deep",
       severity: "medium",
       category: "prompt-injection",
-      ruleId: "meme:tone-conflict",
-      message: "Meme tone mixes personality + imperatives",
-      location: "meme.tone",
+      ruleId: "imprint:tone-conflict",
+      message: "Imprint tone mixes personality + imperatives",
+      location: "imprint.tone",
       snippet: `imperative ${tone.imperativeRatio.toFixed(2)}`,
       action: "WARN",
       overridden: false,
@@ -979,14 +979,14 @@ export function scanForThreatsV2(pkg: MemoryPackage, opts?: ScanOptions): ScanRe
     });
   }
 
-  if (contentType === "meme") {
-    const validation = validateMemeStructure(pkg.meta as MemeMemoryMeta | undefined, memoryText);
+  if (contentType === "imprint") {
+    const validation = validateImprintStructure(pkg.meta as ImprintMeta | undefined, memoryText);
     for (const error of validation.errors) {
       flags.push({
-        id: `schema:meme:${error}`,
+        id: `schema:imprint:${error}`,
         severity: "critical",
         category: "schema",
-        ruleId: "schema:meme-invalid",
+        ruleId: "schema:imprint-invalid",
         message: error,
         location: "meta",
         snippet: error,
@@ -997,10 +997,10 @@ export function scanForThreatsV2(pkg: MemoryPackage, opts?: ScanOptions): ScanRe
     }
     for (const warning of validation.warnings) {
       flags.push({
-        id: `schema:meme-warning:${warning}`,
+        id: `schema:imprint-warning:${warning}`,
         severity: "low",
         category: "schema",
-        ruleId: "schema:meme-warning",
+        ruleId: "schema:imprint-warning",
         message: warning,
         location: "meta",
         snippet: warning,

@@ -8,7 +8,7 @@ import type {
   ImportRegistry,
   ImportResult,
   ImportSafetyReport,
-  MemeMemoryMeta,
+  ImprintMeta,
   MemoryPackage,
 } from "./types.js";
 import {
@@ -52,8 +52,8 @@ function emptySafetyReport(): ImportSafetyReport {
 // Markdown generation
 // ---------------------------------------------------------------------------
 
-function isMemeMeta(meta: MemoryPackage["meta"]): meta is MemeMemoryMeta {
-  return Boolean(meta && "contentType" in meta && meta.contentType === "meme");
+function isImprintMeta(meta: MemoryPackage["meta"]): meta is ImprintMeta {
+  return Boolean(meta && "contentType" in meta && meta.contentType === "imprint");
 }
 
 function formatMarkdown(pkg: MemoryPackage, opts: ImportOptions): string {
@@ -113,9 +113,9 @@ function formatMarkdown(pkg: MemoryPackage, opts: ImportOptions): string {
   return lines.join("\n");
 }
 
-function formatMemeMarkdown(
+function formatImprintMarkdown(
   pkg: MemoryPackage,
-  meta: MemeMemoryMeta | undefined,
+  meta: ImprintMeta | undefined,
   opts: ImportOptions,
 ): string {
   const lines: string[] = [];
@@ -131,7 +131,7 @@ function formatMemeMarkdown(
   // Metadata header
   lines.push(`# ${pkg.title}`);
   lines.push("");
-  lines.push(`> Meme Memory | Rarity: ${rarity} | Strength: ${strength} | Acquired via Memonex | ${date}`);
+  lines.push(`> Imprint | Rarity: ${rarity} | Strength: ${strength} | Acquired via Memonex | ${date}`);
   lines.push(`> Traits: ${traits.join(", ")}`);
   if (meta?.series) {
     lines.push(`> Series: ${meta.series}`);
@@ -198,27 +198,27 @@ function formatMemeMarkdown(
 }
 
 // ---------------------------------------------------------------------------
-// Meme helpers: strength routing, ACTIVE-MEMES.md, compatibility
+// Imprint helpers: strength routing, ACTIVE-IMPRINTS.md, compatibility
 // ---------------------------------------------------------------------------
 
-const MAX_ACTIVE_MEMES = 5;
+const MAX_ACTIVE_IMPRINTS = 5;
 
-function memeSubdirForStrength(strength: string): string {
-  if (strength === "subtle") return path.join("memonex", "memes", "archive");
-  return path.join("memonex", "memes");
+function imprintSubdirForStrength(strength: string): string {
+  if (strength === "subtle") return path.join("memonex", "imprints", "archive");
+  return path.join("memonex", "imprints");
 }
 
-function activeMemesPath(workspaceDir: string): string {
-  return path.join(workspaceDir, "memory", "memonex", "ACTIVE-MEMES.md");
+function activeImprintsPath(workspaceDir: string): string {
+  return path.join(workspaceDir, "memory", "memonex", "ACTIVE-IMPRINTS.md");
 }
 
-type ActiveMemeEntry = { packageId: string; title: string; series?: string };
+type ActiveImprintEntry = { packageId: string; title: string; series?: string };
 
-async function readActiveMemes(workspaceDir: string): Promise<ActiveMemeEntry[]> {
-  const filePath = activeMemesPath(workspaceDir);
+async function readActiveImprints(workspaceDir: string): Promise<ActiveImprintEntry[]> {
+  const filePath = activeImprintsPath(workspaceDir);
   try {
     const content = await fs.readFile(filePath, "utf8");
-    const entries: ActiveMemeEntry[] = [];
+    const entries: ActiveImprintEntry[] = [];
     for (const line of content.split("\n")) {
       const match = line.match(/^- \*\*(.+?)\*\* \(`(.+?)`\)(?:\s+\[series: (.+?)\])?/);
       if (match) {
@@ -231,11 +231,11 @@ async function readActiveMemes(workspaceDir: string): Promise<ActiveMemeEntry[]>
   }
 }
 
-async function writeActiveMemes(workspaceDir: string, entries: ActiveMemeEntry[]): Promise<void> {
+async function writeActiveImprints(workspaceDir: string, entries: ActiveImprintEntry[]): Promise<void> {
   const lines = [
-    "# Active Memes",
+    "# Active Imprints",
     "",
-    "> Meme memories currently influencing personality. Max 5 slots.",
+    "> Imprints currently influencing personality. Max 5 slots.",
     "",
   ];
   for (const entry of entries) {
@@ -243,36 +243,36 @@ async function writeActiveMemes(workspaceDir: string, entries: ActiveMemeEntry[]
     lines.push(`- **${entry.title}** (\`${entry.packageId}\`)${seriesTag}`);
   }
   lines.push("");
-  const filePath = activeMemesPath(workspaceDir);
+  const filePath = activeImprintsPath(workspaceDir);
   await ensureDir(path.dirname(filePath));
   await fs.writeFile(filePath, lines.join("\n"), "utf8");
 }
 
-async function updateActiveMemes(
+async function updateActiveImprints(
   workspaceDir: string,
   pkg: MemoryPackage,
-  meta: MemeMemoryMeta | undefined,
+  meta: ImprintMeta | undefined,
   warnings: string[],
 ): Promise<string> {
   const strength = meta?.strength ?? "medium";
   if (strength !== "strong") return strength;
 
-  const entries = await readActiveMemes(workspaceDir);
-  if (entries.length >= MAX_ACTIVE_MEMES) {
+  const entries = await readActiveImprints(workspaceDir);
+  if (entries.length >= MAX_ACTIVE_IMPRINTS) {
     warnings.push(
-      `ACTIVE-MEMES.md is full (${MAX_ACTIVE_MEMES} slots). Importing as medium strength instead.`,
+      `ACTIVE-IMPRINTS.md is full (${MAX_ACTIVE_IMPRINTS} slots). Importing as medium strength instead.`,
     );
     return "medium";
   }
 
   entries.push({ packageId: pkg.packageId, title: pkg.title, series: meta?.series });
-  await writeActiveMemes(workspaceDir, entries);
+  await writeActiveImprints(workspaceDir, entries);
   return "strong";
 }
 
-function checkMemeCompatibility(
+function checkImprintCompatibility(
   existingRecords: ImportRecord[],
-  newMeta: MemeMemoryMeta | undefined,
+  newMeta: ImprintMeta | undefined,
   warnings: string[],
 ): void {
   if (!newMeta?.compatibilityTags || newMeta.compatibilityTags.length === 0) return;
@@ -280,9 +280,9 @@ function checkMemeCompatibility(
   const newTags = new Set(newMeta.compatibilityTags);
 
   for (const record of existingRecords) {
-    if (record.contentType !== "meme") continue;
+    if (record.contentType !== "imprint") continue;
     // We don't have stored compatibilityTags in registry, so skip deep checks.
-    // This is advisory — just note we have existing memes of same series.
+    // This is advisory — just note we have existing imprints of same series.
   }
 
   // Check for synergy/conflict tag conventions: +tag = synergy, -tag = conflict
@@ -294,25 +294,25 @@ function checkMemeCompatibility(
   }
 
   if (synergies.length > 0) {
-    warnings.push(`Meme synergies: ${synergies.join(", ")}`);
+    warnings.push(`Imprint synergies: ${synergies.join(", ")}`);
   }
   if (conflicts.length > 0) {
-    warnings.push(`Meme conflicts: ${conflicts.join(", ")}`);
+    warnings.push(`Imprint conflicts: ${conflicts.join(", ")}`);
   }
 }
 
 function checkSeriesProgress(
   existingRecords: ImportRecord[],
-  meta: MemeMemoryMeta | undefined,
+  meta: ImprintMeta | undefined,
   warnings: string[],
 ): void {
   if (!meta?.series) return;
-  const seriesMemes = existingRecords.filter(
-    (r) => r.contentType === "meme" && r.series === meta.series,
+  const seriesImprints = existingRecords.filter(
+    (r) => r.contentType === "imprint" && r.series === meta.series,
   );
-  if (seriesMemes.length > 0) {
+  if (seriesImprints.length > 0) {
     warnings.push(
-      `Series "${meta.series}": you now have ${seriesMemes.length + 1} meme(s) from this collection.`,
+      `Series "${meta.series}": you now have ${seriesImprints.length + 1} imprint(s) from this collection.`,
     );
   }
 }
@@ -445,17 +445,17 @@ export async function importMemoryPackage(
 
   // ----- Step 2: Write markdown to workspace -----
   const workspaceDir = opts.workspacePath ?? defaultWorkspacePath();
-  const memeMeta = isMemeMeta(workingPkg.meta) ? workingPkg.meta : undefined;
-  const isMeme = opts.contentType === "meme" || Boolean(memeMeta);
+  const imprintMeta = isImprintMeta(workingPkg.meta) ? workingPkg.meta : undefined;
+  const isImprint = opts.contentType === "imprint" || Boolean(imprintMeta);
 
   let importSubdir: string;
   let effectiveStrength: string | undefined;
   if (opts.importDir) {
     importSubdir = opts.importDir;
-  } else if (isMeme) {
-    // C1: strength-based routing + C2: active memes management
-    effectiveStrength = await updateActiveMemes(workspaceDir, workingPkg, memeMeta, warnings);
-    importSubdir = memeSubdirForStrength(effectiveStrength);
+  } else if (isImprint) {
+    // C1: strength-based routing + C2: active imprints management
+    effectiveStrength = await updateActiveImprints(workspaceDir, workingPkg, imprintMeta, warnings);
+    importSubdir = imprintSubdirForStrength(effectiveStrength);
   } else {
     importSubdir = "memonex";
   }
@@ -464,8 +464,8 @@ export async function importMemoryPackage(
   await ensureDir(memoryDir);
 
   const mdPath = path.join(memoryDir, `${workingPkg.packageId}.md`);
-  const markdown = isMeme
-    ? formatMemeMarkdown(workingPkg, memeMeta, opts)
+  const markdown = isImprint
+    ? formatImprintMarkdown(workingPkg, imprintMeta, opts)
     : formatMarkdown(workingPkg, opts);
   await fs.writeFile(mdPath, markdown, "utf8");
 
@@ -475,8 +475,8 @@ export async function importMemoryPackage(
     const gateway = await createGatewayClient();
     if (gateway?.available) {
       for (const insight of workingPkg.insights) {
-        const tagPrefix = isMeme
-          ? `[Memonex:meme:${workingPkg.packageId}]`
+        const tagPrefix = isImprint
+          ? `[Memonex:imprint:${workingPkg.packageId}]`
           : `[Memonex:${workingPkg.packageId}]`;
         const text = `${tagPrefix} ${insight.title}: ${insight.content}`;
         const stored = await gateway.memoryStore(text);
@@ -493,9 +493,9 @@ export async function importMemoryPackage(
 
   // ----- Step 4: Series + compatibility checks (meme only) -----
   const registry = await loadRegistry();
-  if (isMeme && memeMeta) {
-    checkMemeCompatibility(registry.records, memeMeta, warnings);
-    checkSeriesProgress(registry.records, memeMeta, warnings);
+  if (isImprint && imprintMeta) {
+    checkImprintCompatibility(registry.records, imprintMeta, warnings);
+    checkSeriesProgress(registry.records, imprintMeta, warnings);
   }
 
   // ----- Step 5: Update import registry -----
@@ -518,8 +518,8 @@ export async function importMemoryPackage(
       allowedUse: workingPkg.license.allowedUse,
       prohibitedUse: workingPkg.license.prohibitedUse,
     },
-    contentType: isMeme ? "meme" : undefined,
-    series: memeMeta?.series,
+    contentType: isImprint ? "imprint" : undefined,
+    series: imprintMeta?.series,
   };
 
   registry.records.push(record);

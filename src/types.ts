@@ -7,7 +7,7 @@ export type Base64String = string;
 // Memory content types
 // ---------------------------------------------------------------------------
 
-export type MemoryContentType = "knowledge" | "meme";
+export type MemoryContentType = "knowledge" | "imprint";
 
 export type MemonexNetwork = "base-sepolia" | "base";
 
@@ -98,11 +98,11 @@ export type PrivacyReview = {
 };
 
 // ---------------------------------------------------------------------------
-// Meme memory metadata
+// Imprint metadata
 // ---------------------------------------------------------------------------
 
-export interface MemeMemoryMeta {
-  contentType: "meme";
+export interface ImprintMeta {
+  contentType: "imprint";
   rarity: "common" | "uncommon" | "rare" | "legendary" | "mythic";
   series?: string;
   traits: string[];
@@ -115,7 +115,7 @@ export interface MemeMemoryMeta {
   compatibilityTags?: string[];
 }
 
-export type MemoryMeta = { contentType?: "knowledge" } | MemeMemoryMeta;
+export type MemoryMeta = { contentType?: "knowledge" } | ImprintMeta;
 
 export type MemoryPackage = {
   schema: "memonex.memorypackage.v1";
@@ -442,7 +442,7 @@ export interface ScanResult {
   contentType: MemoryContentType;
 }
 
-export interface MemeValidation {
+export interface ImprintValidation {
   ok: boolean;
   errors: string[];
   warnings: string[];

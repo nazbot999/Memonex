@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { importMemoryPackage } from "../import.js";
-import { makeKnowledgePackage, makeMemePackage } from "./helpers.js";
+import { makeKnowledgePackage, makeImprintPackage } from "./helpers.js";
 
 // Mock the gateway so we don't need a real connection
 vi.mock("../gateway.js", () => ({
@@ -39,52 +39,52 @@ describe("knowledge import", () => {
   });
 });
 
-describe("meme import — strength routing", () => {
-  it("routes medium-strength meme to memes/ directory", async () => {
-    const pkg = makeMemePackage({ memeMeta: { strength: "medium" } });
+describe("imprint import — strength routing", () => {
+  it("routes medium-strength imprint to imprints/ directory", async () => {
+    const pkg = makeImprintPackage({ imprintMeta: { strength: "medium" } });
     const result = await importMemoryPackage(pkg, {
       workspacePath: TEST_WORKSPACE,
       skipLanceDB: true,
       skipIntegrityCheck: true,
       skipPrivacyScan: true,
-      contentType: "meme",
+      contentType: "imprint",
     });
 
     expect(result.success).toBe(true);
-    expect(result.markdownPath).toContain(path.join("memonex", "memes"));
+    expect(result.markdownPath).toContain(path.join("memonex", "imprints"));
     expect(result.markdownPath).not.toContain("archive");
   });
 
-  it("routes subtle-strength meme to archive/ directory", async () => {
-    const pkg = makeMemePackage({ memeMeta: { strength: "subtle" } });
+  it("routes subtle-strength imprint to archive/ directory", async () => {
+    const pkg = makeImprintPackage({ imprintMeta: { strength: "subtle" } });
     const result = await importMemoryPackage(pkg, {
       workspacePath: TEST_WORKSPACE,
       skipLanceDB: true,
       skipIntegrityCheck: true,
       skipPrivacyScan: true,
-      contentType: "meme",
+      contentType: "imprint",
     });
 
     expect(result.success).toBe(true);
     expect(result.markdownPath).toContain("archive");
   });
 
-  it("routes strong-strength meme to memes/ and updates ACTIVE-MEMES.md", async () => {
-    const pkg = makeMemePackage({ memeMeta: { strength: "strong" } });
+  it("routes strong-strength imprint to imprints/ and updates ACTIVE-IMPRINTS.md", async () => {
+    const pkg = makeImprintPackage({ imprintMeta: { strength: "strong" } });
     const result = await importMemoryPackage(pkg, {
       workspacePath: TEST_WORKSPACE,
       skipLanceDB: true,
       skipIntegrityCheck: true,
       skipPrivacyScan: true,
-      contentType: "meme",
+      contentType: "imprint",
     });
 
     expect(result.success).toBe(true);
-    expect(result.markdownPath).toContain(path.join("memonex", "memes"));
+    expect(result.markdownPath).toContain(path.join("memonex", "imprints"));
 
-    // Verify ACTIVE-MEMES.md was created
-    const activeMemesPath = path.join(TEST_WORKSPACE, "memory", "memonex", "ACTIVE-MEMES.md");
-    const content = await fs.readFile(activeMemesPath, "utf8");
+    // Verify ACTIVE-IMPRINTS.md was created
+    const activeImprintsPath = path.join(TEST_WORKSPACE, "memory", "memonex", "ACTIVE-IMPRINTS.md");
+    const content = await fs.readFile(activeImprintsPath, "utf8");
     expect(content).toContain(pkg.title);
   });
 });
@@ -141,10 +141,10 @@ describe("all-blocked package fails", () => {
   });
 });
 
-describe("meme markdown format (C3)", () => {
+describe("imprint markdown format (C3)", () => {
   it("generates spec-aligned markdown sections", async () => {
-    const pkg = makeMemePackage({
-      memeMeta: {
+    const pkg = makeImprintPackage({
+      imprintMeta: {
         strength: "medium",
         behavioralEffects: ["I question everything"],
         activationTriggers: ["when someone is too optimistic"],
@@ -159,7 +159,7 @@ describe("meme markdown format (C3)", () => {
       skipLanceDB: true,
       skipIntegrityCheck: true,
       skipPrivacyScan: true,
-      contentType: "meme",
+      contentType: "imprint",
     });
 
     const md = await fs.readFile(result.markdownPath, "utf8");
