@@ -101,7 +101,7 @@ test/
 
 | Contract | Address |
 |----------|---------|
-| MemonexMarket | [`0x4507789a434d51480a22900D789CDcef43509603`](https://sepolia.basescan.org/address/0x4507789a434d51480a22900D789CDcef43509603) |
+| MemonexMarket | [`0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877`](https://sepolia.basescan.org/address/0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877) |
 | USDC (testnet) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | EAS | `0x4200000000000000000000000000000000000021` |
 
@@ -194,11 +194,11 @@ Full two-address demo (separate seller + buyer wallets):
 
 | Step | Transaction | Status |
 |------|------------|--------|
-| List Memory | [`0xf286f002...`](https://sepolia.basescan.org/tx/0xf286f002f2213064dd6d30ab7430a3402100f83041956fd8c45a2abec3ebbc90) | Seller lists (10 USDC, 1 USDC eval fee) |
-| Self-Buy | [`0xc0a314b0...`](https://sepolia.basescan.org/tx/0xc0a314b0fefbb119b8b996a201f448ec702274f00a7980489d8687570004489c) | Reverts with `CannotSelfBuy` |
-| Reserve | [`0x91693400...`](https://sepolia.basescan.org/tx/0x916934003d8f268a695b72e48ae209850afc5b32ec5d535b7c85ac6756bc8d3d) | Buyer pays eval fee + provides pubkey |
-| Confirm | [`0xd03af2a1...`](https://sepolia.basescan.org/tx/0xd03af2a16ada81035ffe20b8533ec3b6017a44dc1460e8b06ffa776b3f111895) | Buyer pays remaining 9 USDC |
-| Deliver | [`0x60ea569e...`](https://sepolia.basescan.org/tx/0x60ea569e32e54ee8d356c998949a375d0b3ba3d35ceeaf16822e03051b77d1db) | Seller delivers encrypted key capsule |
+| List Memory | [`0x22c69682...`](https://sepolia.basescan.org/tx/0x22c69682e53cd2a940cf4ce45617156d0c91e628d77a53288c06ee53d2893082) | Seller lists (10 USDC, 1 USDC eval fee) |
+| Self-Buy | [`0xa978e22c...`](https://sepolia.basescan.org/tx/0xa978e22cd8a1e991236572e107f824951810718d1bc217d0f7a6a7bf55e1c191) | Reverts with `CannotSelfBuy` |
+| Reserve | [`0x53708e2a...`](https://sepolia.basescan.org/tx/0x53708e2a18030ca5e8f6c1b6a51622517f0a85e35b6ba9afade72777276f04f1) | Buyer pays eval fee + provides pubkey |
+| Confirm | [`0x01692c1b...`](https://sepolia.basescan.org/tx/0x01692c1b1b4b8089fd8bd48ce8115830946314dc39c04672c656f983ae9f611c) | Buyer pays remaining 9 USDC |
+| Deliver | [`0x6f398e19...`](https://sepolia.basescan.org/tx/0x6f398e19c971ff9c9040c12b65e5fbb0b5e78f8de3f067542e6c9e6755c973d7) | Seller delivers encrypted key capsule |
 
 ## Development
 

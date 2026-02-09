@@ -20,7 +20,7 @@ import type { ListingTupleV2, SellerStatsV2 } from "./types.js";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 
-export const MEMONEX_MARKET = "0x4507789a434d51480a22900D789CDcef43509603" as const satisfies Address;
+export const MEMONEX_MARKET = "0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877" as const satisfies Address;
 export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const satisfies Address;
 export const EAS_BASE_SEPOLIA = "0x4200000000000000000000000000000000000021" as const satisfies Address;
 
@@ -231,6 +231,34 @@ export const MEMONEX_MARKET_ABI = [
     stateMutability: "view",
     inputs: [{ name: "seller", type: "address" }],
     outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getSellerReputation",
+    stateMutability: "view",
+    inputs: [{ name: "seller", type: "address" }],
+    outputs: [
+      { name: "count", type: "uint256" },
+      { name: "summaryValue", type: "int256" },
+      { name: "summaryValueDecimals", type: "uint8" },
+    ],
+  },
+  {
+    type: "function",
+    name: "getSellerValidationSummary",
+    stateMutability: "view",
+    inputs: [{ name: "seller", type: "address" }],
+    outputs: [
+      { name: "count", type: "uint256" },
+      { name: "averageResponse", type: "uint256" },
+    ],
+  },
+  {
+    type: "function",
+    name: "getValidationRequestHash",
+    stateMutability: "view",
+    inputs: [{ name: "listingId", type: "uint256" }],
+    outputs: [{ name: "", type: "bytes32" }],
   },
 ] as const;
 
@@ -584,6 +612,44 @@ export async function getSellerAgentId(params: { clients: Clients; seller: Addre
     functionName: "getSellerAgentId",
     args: [params.seller],
   })) as bigint;
+}
+
+export async function getSellerReputation(params: { clients: Clients; seller: Address }): Promise<{
+  count: bigint;
+  summaryValue: bigint;
+  summaryValueDecimals: number;
+}> {
+  const result = await params.clients.publicClient.readContract({
+    address: MEMONEX_MARKET,
+    abi: MEMONEX_MARKET_ABI,
+    functionName: "getSellerReputation",
+    args: [params.seller],
+  });
+  const [count, summaryValue, summaryValueDecimals] = result as [bigint, bigint, number];
+  return { count, summaryValue, summaryValueDecimals };
+}
+
+export async function getSellerValidationSummary(params: { clients: Clients; seller: Address }): Promise<{
+  count: bigint;
+  averageResponse: bigint;
+}> {
+  const result = await params.clients.publicClient.readContract({
+    address: MEMONEX_MARKET,
+    abi: MEMONEX_MARKET_ABI,
+    functionName: "getSellerValidationSummary",
+    args: [params.seller],
+  });
+  const [count, averageResponse] = result as [bigint, bigint];
+  return { count, averageResponse };
+}
+
+export async function getValidationRequestHash(params: { clients: Clients; listingId: bigint }): Promise<`0x${string}`> {
+  return (await params.clients.publicClient.readContract({
+    address: MEMONEX_MARKET,
+    abi: MEMONEX_MARKET_ABI,
+    functionName: "getValidationRequestHash",
+    args: [params.listingId],
+  })) as `0x${string}`;
 }
 
 export async function registerSeller(params: { clients: Clients; agentURI: string }): Promise<bigint> {

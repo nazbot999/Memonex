@@ -16,11 +16,19 @@ import {
   reserve,
   confirm,
   deliver,
+  getSellerReputation,
+  getSellerValidationSummary,
+  getValidationRequestHash,
+  registerSeller,
 } from "./contract.js";
 import { extractRawItems, curateInsights, buildMemoryPackage } from "./memory.js";
 import { sanitizeInsights } from "./privacy.js";
 import { generatePreview } from "./preview.js";
 import { createIpfsClient } from "./ipfs.js";
+import {
+  getAgentTrustScore,
+  getAgentReputationSummary,
+} from "./erc8004.js";
 import {
   decodeKeyMaterialJson,
   decryptEnvelope,
@@ -92,6 +100,19 @@ async function main(): Promise<void> {
   console.log("  market:", MEMONEX_MARKET);
   console.log("  seller:", seller.address);
   console.log("  buyer:", buyer.address);
+
+  // -----------------------------
+  // 0) ERC-8004 Identity: Register seller agent
+  // -----------------------------
+  console.log("\n[ERC-8004 Identity] Registering seller agent…");
+  let sellerAgentId: bigint;
+  try {
+    sellerAgentId = await registerSeller({ clients: seller, agentURI: "ipfs://memonex-demo-agent" });
+    console.log("  agentId:", sellerAgentId.toString());
+  } catch (err: any) {
+    console.log("  Registration skipped (may already be registered):", err.message?.slice(0, 80));
+    sellerAgentId = 0n;
+  }
 
   // -----------------------------
   // 1) Extract + curate
@@ -232,6 +253,22 @@ async function main(): Promise<void> {
     await saveBuyerKeypair(buyerKeypair);
   }
 
+  // -----------------------------
+  // ERC-8004: Buyer due diligence — query seller trust score
+  // -----------------------------
+  if (sellerAgentId > 0n) {
+    console.log("\n[ERC-8004 Reputation] Buyer querying seller trust score…");
+    try {
+      const trustScore = await getAgentTrustScore(buyer.publicClient as any, sellerAgentId);
+      console.log("  reputation count:", trustScore.reputationCount.toString());
+      console.log("  average rating:", trustScore.averageRating.toFixed(2));
+      console.log("  validation count:", trustScore.validationCount.toString());
+      console.log("  composite score:", trustScore.compositeScore.toFixed(3));
+    } catch (err: any) {
+      console.log("  Trust score query failed (expected if registries not live):", err.message?.slice(0, 80));
+    }
+  }
+
   // Wait for RPC propagation (Base Sepolia public RPC is load-balanced)
   await new Promise(r => setTimeout(r, 5000));
 
@@ -349,14 +386,59 @@ async function main(): Promise<void> {
     console.log("  warnings:", importResult.warnings);
   }
 
+  // -----------------------------
+  // ERC-8004: Show validation audit trail
+  // -----------------------------
+  if (sellerAgentId > 0n) {
+    console.log("\n[ERC-8004 Validation] Checking delivery validation…");
+    try {
+      const reqHash = await getValidationRequestHash({ clients: buyer, listingId: listed.listingId });
+      console.log("  validation request hash:", reqHash);
+
+      const valSummary = await getSellerValidationSummary({ clients: buyer, seller: seller.address });
+      console.log("  total validated deliveries:", valSummary.count.toString());
+      console.log("  average response:", valSummary.averageResponse.toString());
+    } catch (err: any) {
+      console.log("  Validation query failed:", err.message?.slice(0, 80));
+    }
+  }
+
+  // -----------------------------
+  // ERC-8004: Rate seller and show reputation propagation
+  // -----------------------------
+  console.log("\n[ERC-8004 Reputation] Rating seller (5/5)…");
+  try {
+    const { rateSeller } = await import("./contract.js");
+    await rateSeller({ clients: buyer, listingId: listed.listingId, rating: 5 });
+    console.log("  Rating submitted!");
+
+    if (sellerAgentId > 0n) {
+      // Query via marketplace contract
+      const repViaMarket = await getSellerReputation({ clients: buyer, seller: seller.address });
+      console.log("  [via marketplace] reputation count:", repViaMarket.count.toString());
+      console.log("  [via marketplace] summary value:", repViaMarket.summaryValue.toString());
+
+      // Query directly from reputation registry
+      try {
+        const repDirect = await getAgentReputationSummary(buyer.publicClient as any, sellerAgentId, "memonex", "memory-trade");
+        console.log("  [via registry]    reputation count:", repDirect.count.toString());
+        console.log("  [via registry]    summary value:", repDirect.summaryValue.toString());
+      } catch {
+        console.log("  [via registry]    query failed (expected if registries not live)");
+      }
+    }
+  } catch (err: any) {
+    console.log("  Rating failed:", err.message?.slice(0, 80));
+  }
+
   const rec = await findSellerKeyRecordByContentHash(contentHash);
   if (rec) {
-    console.log("Seller keystore record:");
+    console.log("\nSeller keystore record:");
     console.log("  listingId:", rec.listingId?.toString());
     console.log("  status:", rec.status);
   }
 
-  console.log("Demo complete.");
+  console.log("\nDemo complete.");
 }
 
 main().catch((err) => {

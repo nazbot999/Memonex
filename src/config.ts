@@ -1,7 +1,25 @@
 import type { Address, Chain, Hex } from "viem";
+import { defineChain } from "viem";
 import { base, baseSepolia } from "viem/chains";
 
-export type MemonexNetwork = "base-sepolia" | "base";
+export type MemonexNetwork = "base-sepolia" | "base" | "monad" | "monad-testnet";
+
+export const monad = defineChain({
+  id: 143,
+  name: "Monad",
+  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.monad.xyz"] } },
+  blockExplorers: { default: { name: "MonadScan", url: "https://monadscan.com" } },
+});
+
+export const monadTestnet = defineChain({
+  id: 10143,
+  name: "Monad Testnet",
+  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+  rpcUrls: { default: { http: ["https://testnet-rpc.monad.xyz"] } },
+  blockExplorers: { default: { name: "Monad Explorer", url: "https://testnet.monadexplorer.com" } },
+  testnet: true,
+});
 
 export type MemonexAddresses = {
   market: Address;
@@ -9,6 +27,9 @@ export type MemonexAddresses = {
   eas: Address;
   settlementSchemaUid?: Hex;
   ratingSchemaUid?: Hex;
+  identityRegistry?: Address;
+  reputationRegistry?: Address;
+  validationRegistry?: Address;
 };
 
 export type MemonexChainConfig = {
@@ -38,9 +59,12 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     rpcUrls: ["https://sepolia.base.org"],
     explorerBaseUrl: "https://sepolia.basescan.org",
     addresses: {
-      market: "0x4507789a434d51480a22900D789CDcef43509603",
+      market: "0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877",
       usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
       eas: "0x4200000000000000000000000000000000000021",
+      identityRegistry: "0x7177a6867296406881E20d6647232314736Dd09A",
+      reputationRegistry: "0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322",
+      validationRegistry: "0x662b40A526cb4017d947e71eAF6753BF3eeE66d8",
     },
     defaultIpfsGateways: [
       "https://cloudflare-ipfs.com/ipfs/",
@@ -58,6 +82,40 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
       market: "0x0000000000000000000000000000000000000000",
       usdc: "0x0000000000000000000000000000000000000000",
       eas: "0x4200000000000000000000000000000000000021",
+    },
+    defaultIpfsGateways: [
+      "https://cloudflare-ipfs.com/ipfs/",
+      "https://gateway.pinata.cloud/ipfs/",
+      "https://ipfs.io/ipfs/",
+    ],
+  },
+  monad: {
+    network: "monad",
+    chain: monad,
+    chainId: 143,
+    rpcUrls: ["https://rpc.monad.xyz"],
+    explorerBaseUrl: "https://monadscan.com",
+    addresses: {
+      market: "0x0000000000000000000000000000000000000000",
+      usdc: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+      eas: "0x0000000000000000000000000000000000000000",
+    },
+    defaultIpfsGateways: [
+      "https://cloudflare-ipfs.com/ipfs/",
+      "https://gateway.pinata.cloud/ipfs/",
+      "https://ipfs.io/ipfs/",
+    ],
+  },
+  "monad-testnet": {
+    network: "monad-testnet",
+    chain: monadTestnet,
+    chainId: 10143,
+    rpcUrls: ["https://testnet-rpc.monad.xyz"],
+    explorerBaseUrl: "https://testnet.monadexplorer.com",
+    addresses: {
+      market: "0x0000000000000000000000000000000000000000",
+      usdc: "0x0000000000000000000000000000000000000000",
+      eas: "0x0000000000000000000000000000000000000000",
     },
     defaultIpfsGateways: [
       "https://cloudflare-ipfs.com/ipfs/",
@@ -99,12 +157,14 @@ function parseHex(value?: string): Hex | undefined {
 function resolveNetworkFromChainId(chainId?: number): MemonexNetwork | undefined {
   if (chainId === 84532) return "base-sepolia";
   if (chainId === 8453) return "base";
+  if (chainId === 143) return "monad";
+  if (chainId === 10143) return "monad-testnet";
   return undefined;
 }
 
 function getEnvNetwork(): MemonexNetwork | undefined {
   const env = process.env.MEMONEX_NETWORK?.trim();
-  if (env === "base" || env === "base-sepolia") return env;
+  if (env === "base" || env === "base-sepolia" || env === "monad" || env === "monad-testnet") return env;
   return undefined;
 }
 
@@ -143,12 +203,27 @@ function getEnvOverrides(): Partial<MemonexChainConfig> {
     parseHex(process.env.MEMONEX_RATING_SCHEMA_UID)
     ?? parseHex(process.env.RATING_SCHEMA_UID);
 
+  const identityRegistry =
+    parseAddress(process.env.MEMONEX_IDENTITY_REGISTRY)
+    ?? parseAddress(process.env.IDENTITY_REGISTRY);
+
+  const reputationRegistry =
+    parseAddress(process.env.MEMONEX_REPUTATION_REGISTRY)
+    ?? parseAddress(process.env.REPUTATION_REGISTRY);
+
+  const validationRegistry =
+    parseAddress(process.env.MEMONEX_VALIDATION_REGISTRY)
+    ?? parseAddress(process.env.VALIDATION_REGISTRY);
+
   const addresses: Partial<MemonexAddresses> = {};
   if (market) addresses.market = market;
   if (usdc) addresses.usdc = usdc;
   if (eas) addresses.eas = eas;
   if (settlementSchemaUid) addresses.settlementSchemaUid = settlementSchemaUid;
   if (ratingSchemaUid) addresses.ratingSchemaUid = ratingSchemaUid;
+  if (identityRegistry) addresses.identityRegistry = identityRegistry;
+  if (reputationRegistry) addresses.reputationRegistry = reputationRegistry;
+  if (validationRegistry) addresses.validationRegistry = validationRegistry;
 
   return {
     chainId,

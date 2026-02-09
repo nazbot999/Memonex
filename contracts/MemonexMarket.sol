@@ -175,6 +175,9 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
     // Purchase tracking for discounts
     mapping(uint256 listingId => mapping(address buyer => bool)) private _hasPurchased;
 
+    /// @notice Stored validation request hashes for delivered listings
+    mapping(uint256 listingId => bytes32) private _validationRequestHashes;
+
     // ------------------------------------------------------------------
     // Events
     // ------------------------------------------------------------------
@@ -188,7 +191,7 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
     event RatingSubmitted(uint256 indexed listingId, address indexed buyer, uint8 rating);
     event SellerRegistered(address indexed seller, uint256 indexed agentId);
     event ReputationSubmitted(uint256 indexed listingId, uint256 indexed agentId, uint8 rating);
-    event ValidationRecorded(uint256 indexed listingId, uint256 indexed agentId, bytes32 contentHash);
+    event ValidationRecorded(uint256 indexed listingId, uint256 indexed agentId, bytes32 requestHash);
 
     event MemoryListed(
         uint256 indexed listingId,
@@ -346,16 +349,49 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
     }
 
     /// @notice Get seller's cached ERC-8004 agent ID (0 if not linked).
-    /// @dev Falls back to live registry lookup if no cached value.
     function getSellerAgentId(address seller) external view returns (uint256) {
-        uint256 cached = _sellerAgentIds[seller];
-        if (cached != 0) return cached;
-        if (address(identityRegistry) == address(0)) return 0;
-        try identityRegistry.agentIdOf(seller) returns (uint256 agentId) {
-            return agentId;
+        return _sellerAgentIds[seller];
+    }
+
+    /// @notice Get seller's reputation from ERC-8004 reputation registry.
+    function getSellerReputation(address seller)
+        external
+        view
+        returns (uint256 count, int256 summaryValue, uint8 summaryValueDecimals)
+    {
+        uint256 agentId = _sellerAgentIds[seller];
+        if (agentId == 0 || address(reputationRegistry) == address(0)) return (0, 0, 0);
+        try reputationRegistry.getSummary(agentId, new address[](0), "memonex", "memory-trade")
+            returns (uint256 c, int256 v, uint8 d)
+        {
+            return (c, v, d);
         } catch {
-            return 0;
+            return (0, 0, 0);
         }
+    }
+
+    /// @notice Get seller's validation summary from ERC-8004 validation registry.
+    function getSellerValidationSummary(address seller)
+        external
+        view
+        returns (uint256 count, uint256 averageResponse)
+    {
+        uint256 agentId = _sellerAgentIds[seller];
+        if (agentId == 0 || address(validationRegistry) == address(0)) return (0, 0);
+        address[] memory validators = new address[](1);
+        validators[0] = address(this);
+        try validationRegistry.getSummary(agentId, validators, "memonex-delivery")
+            returns (uint256 c, uint256 a)
+        {
+            return (c, a);
+        } catch {
+            return (0, 0);
+        }
+    }
+
+    /// @notice Get the validation request hash for a delivered listing.
+    function getValidationRequestHash(uint256 listingId) external view returns (bytes32) {
+        return _validationRequestHashes[listingId];
     }
 
     function balanceOf(address account) external view returns (uint256) {
@@ -413,16 +449,7 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
             if (prevListingId >= listingId) revert InvalidPrevListing();
         }
 
-        // Check cached agentId first, then fall back to live registry lookup
         uint256 sellerAgentId = _sellerAgentIds[msg.sender];
-        if (sellerAgentId == 0 && address(identityRegistry) != address(0)) {
-            try identityRegistry.agentIdOf(msg.sender) returns (uint256 agentId) {
-                sellerAgentId = agentId;
-                if (agentId != 0) _sellerAgentIds[msg.sender] = agentId;
-            } catch {
-                sellerAgentId = 0;
-            }
-        }
 
         Listing storage l = _listings[listingId];
         l.seller = msg.sender;
@@ -506,8 +533,14 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
         emit MemoryCompleted(listingId, uid);
 
         if (address(validationRegistry) != address(0) && l.sellerAgentId != 0) {
-            try validationRegistry.recordValidation(l.sellerAgentId, l.contentHash, true, "") {
-                emit ValidationRecorded(listingId, l.sellerAgentId, l.contentHash);
+            bytes32 reqHash = keccak256(abi.encodePacked(address(this), l.sellerAgentId, l.contentHash, listingId));
+            try validationRegistry.validationRequest(address(this), l.sellerAgentId, "", reqHash) {
+                try validationRegistry.validationResponse(reqHash, 1, "", l.contentHash, "memonex-delivery") {
+                    _validationRequestHashes[listingId] = reqHash;
+                    emit ValidationRecorded(listingId, l.sellerAgentId, reqHash);
+                } catch {
+                    // best-effort
+                }
             } catch {
                 // best-effort
             }
@@ -611,7 +644,9 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
         _attestRating(listingId, l, rating);
 
         if (address(reputationRegistry) != address(0) && l.sellerAgentId != 0) {
-            try reputationRegistry.submitFeedback(l.sellerAgentId, listingId, int8(rating), "") {
+            try reputationRegistry.giveFeedback(
+                l.sellerAgentId, int128(int8(rating)), 0, "memonex", "memory-trade", "", "", bytes32(0)
+            ) {
                 emit ReputationSubmitted(listingId, l.sellerAgentId, rating);
             } catch {
                 // best-effort

@@ -390,6 +390,34 @@ export type SellerStatsV2 = {
 };
 
 // ---------------------------------------------------------------------------
+// ERC-8004 types
+// ---------------------------------------------------------------------------
+
+export type ReputationSummary = {
+  count: bigint;
+  summaryValue: bigint;
+  summaryValueDecimals: number;
+};
+
+export type ValidationSummary = {
+  count: bigint;
+  averageResponse: bigint;
+};
+
+export type AgentTrustScore = {
+  reputationCount: bigint;
+  averageRating: number;
+  validationCount: bigint;
+  validationPassRate: number;
+  compositeScore: number;
+};
+
+export type MetadataEntry = {
+  key: string;
+  value: `0x${string}`;
+};
+
+// ---------------------------------------------------------------------------
 // Gateway
 // ---------------------------------------------------------------------------
 

@@ -612,6 +612,7 @@ contract MemonexMarketTest is Test {
 
     function testRegisterSeller_GetsAgentId() public {
         uint256 agentId = _registerSeller(seller);
+        // Use test-only helper (not in spec) for verification
         assertEq(identityRegistry.agentIdOf(seller), agentId);
         assertEq(market.getSellerAgentId(seller), agentId);
     }
@@ -633,13 +634,15 @@ contract MemonexMarketTest is Test {
         market.rateSeller(listingId, 5);
 
         assertEq(reputationRegistry.feedbackCount(), 1);
-        (address submitter, uint256 targetAgentId, uint256 taskId, int8 score, string memory comment) =
-            reputationRegistry.feedbacks(0);
-        assertEq(submitter, address(market));
-        assertEq(targetAgentId, agentId);
-        assertEq(taskId, listingId);
-        assertEq(score, int8(5));
-        assertEq(comment, "");
+        (
+            int128 value, uint8 valueDecimals, string memory tag1, string memory tag2,
+            , , , bool revoked,
+        ) = reputationRegistry.readFeedback(agentId, address(market), 0);
+        assertEq(value, int128(5));
+        assertEq(valueDecimals, 0);
+        assertEq(tag1, "memonex");
+        assertEq(tag2, "memory-trade");
+        assertEq(revoked, false);
     }
 
     function testDeliver_RecordsValidation() public {
@@ -652,14 +655,22 @@ contract MemonexMarketTest is Test {
         market.deliver(listingId, "encKeyBlob");
 
         assertEq(validationRegistry.validationCount(), 1);
-        (address submitter, uint256 recordedAgentId, bytes32 taskHash, bool passed, string memory evidence) =
-            validationRegistry.validations(0);
-        assertEq(submitter, address(market));
+
+        // Check validation request hash was stored
+        bytes32 reqHash = market.getValidationRequestHash(listingId);
+        assertGt(uint256(reqHash), 0);
+
+        // Verify the validation status via the mock
+        (
+            address requestor, address validator, uint256 recordedAgentId,
+            uint8 response, string memory tag, bool responded, ,
+        ) = validationRegistry.getValidationStatus(reqHash);
+        assertEq(requestor, address(market));
+        assertEq(validator, address(market));
         assertEq(recordedAgentId, agentId);
-        MemonexMarket.Listing memory l = market.getListing(listingId);
-        assertEq(taskHash, l.contentHash);
-        assertEq(passed, true);
-        assertEq(evidence, "");
+        assertEq(response, 1);
+        assertEq(tag, "memonex-delivery");
+        assertEq(responded, true);
     }
 
     function testZeroRegistries_SkipCalls() public {
@@ -736,5 +747,53 @@ contract MemonexMarketTest is Test {
         assertEq(l2.rating, 5);
         assertEq(reputationRegistry.feedbackCount(), 0);
         assertEq(validationRegistry.validationCount(), 0);
+    }
+
+    function testGetSellerReputation_QueriesSummary() public {
+        _registerSeller(seller);
+        uint256 listingId = _listDefault();
+        _complete(listingId, buyer);
+
+        vm.prank(buyer);
+        market.rateSeller(listingId, 5);
+
+        (uint256 count, int256 summaryValue, ) = market.getSellerReputation(seller);
+        assertEq(count, 1);
+        assertEq(summaryValue, 5);
+    }
+
+    function testGetSellerValidationSummary() public {
+        _registerSeller(seller);
+        uint256 listingId = _listDefault();
+        _reserve(listingId, buyer);
+        _confirm(listingId, buyer);
+
+        vm.prank(seller);
+        market.deliver(listingId, "encKeyBlob");
+
+        (uint256 count, uint256 avgResponse) = market.getSellerValidationSummary(seller);
+        assertEq(count, 1);
+        assertEq(avgResponse, 1);
+    }
+
+    function testGetValidationRequestHash() public {
+        _registerSeller(seller);
+        uint256 listingId = _listDefault();
+        _reserve(listingId, buyer);
+        _confirm(listingId, buyer);
+
+        vm.prank(seller);
+        market.deliver(listingId, "encKeyBlob");
+
+        bytes32 reqHash = market.getValidationRequestHash(listingId);
+        assertGt(uint256(reqHash), 0);
+    }
+
+    function testListMemory_NoAgentIdOfFallback() public {
+        // List without registering — should get agentId 0 (no reverse lookup fallback)
+        uint256 listingId = _listDefault();
+        MemonexMarket.Listing memory l = market.getListing(listingId);
+        assertEq(l.sellerAgentId, 0);
+        assertEq(market.getSellerAgentId(seller), 0);
     }
 }
