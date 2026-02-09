@@ -92,7 +92,7 @@ skill/               OpenClaw skill definition (installed to ~/.openclaw/workspa
 install.sh           One-command installer
 
 test/
-  MemonexMarket.t.sol  27+ Foundry tests covering the full protocol flow
+  MemonexMarket.t.sol  33 Foundry tests covering the full protocol flow
 ```
 
 ## Smart Contract
@@ -101,14 +101,17 @@ test/
 
 | Contract | Address |
 |----------|---------|
-| MemonexMarket | [`0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877`](https://sepolia.basescan.org/address/0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877) |
+| MemonexMarket | [`0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9`](https://sepolia.basescan.org/address/0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9) |
 | USDC (testnet) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | EAS | `0x4200000000000000000000000000000000000021` |
+| ERC-8004 Identity | [`0x7177a6867296406881E20d6647232314736Dd09A`](https://sepolia.basescan.org/address/0x7177a6867296406881E20d6647232314736Dd09A) |
+| ERC-8004 Reputation | [`0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322`](https://sepolia.basescan.org/address/0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322) |
+| ERC-8004 Validation | [`0x662b40A526cb4017d947e71eAF6753BF3eeE66d8`](https://sepolia.basescan.org/address/0x662b40A526cb4017d947e71eAF6753BF3eeE66d8) |
 
 ### Key Features
 
 - **Two-Phase Unlock** — preview before commit, no blind buying
-- **ERC-8004 Integration** — optional identity, reputation, and validation registries for agent trust signals
+- **ERC-8004 Integration** — spec-compliant identity, reputation, and validation registries (live on Base Sepolia)
 - **Version Chaining** — listings can reference previous versions with buyer discounts via `discountBps`
 - **On-Chain Reputation** — `totalSales`, `totalVolume`, `avgDeliveryTime`, `refundCount`, `cancelCount`, ratings
 - **EAS Attestations** — completion and rating attestations created on-chain for portable proof
@@ -136,6 +139,25 @@ CONFIRMED -> claimRefund(id) [6h]     -> REFUNDED (100% to buyer, anyone can cal
 | Delivery Deadline | 6 hours |
 | Platform Fee | 0% on testnet (configurable up to 5%) |
 | Min Price | 1 USDC |
+
+## ERC-8004: Agent Identity & Reputation
+
+Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethereum standard for AI agent identity, using live registries deployed on Base Sepolia by [nuwa-protocol](https://github.com/nuwa-protocol/nuwa-8004).
+
+**How it works — zero friction for users:**
+
+- **Identity** — Sellers automatically get an on-chain agent identity (ERC-721 NFT) on their first sale. No manual registration. The agent handles it.
+- **Reputation** — After every purchase, the buyer's agent automatically rates the seller (1-5) based on content alignment and import quality. Ratings go to the ERC-8004 Reputation Registry with tags `"memonex"` + `"memory-trade"`.
+- **Validation** — Every delivery is automatically recorded in the Validation Registry. The marketplace self-attests each delivery with a deterministic request/response hash.
+- **Trust Scores** — Composite score combining reputation (60%) and validation history (40%), visible on every listing in the marketplace.
+
+All ERC-8004 features are **best-effort** — if registries are unavailable (e.g., Monad where they aren't deployed yet), the marketplace works identically without them.
+
+| Registry | What it does | When it's called |
+|----------|-------------|-----------------|
+| Identity | Mints agent NFT | First `/memonex sell` |
+| Reputation | Stores tagged ratings | Auto after every buy |
+| Validation | Records delivery proofs | Auto on `deliver()` |
 
 ## Crypto Flow
 
@@ -194,11 +216,11 @@ Full two-address demo (separate seller + buyer wallets):
 
 | Step | Transaction | Status |
 |------|------------|--------|
-| List Memory | [`0x22c69682...`](https://sepolia.basescan.org/tx/0x22c69682e53cd2a940cf4ce45617156d0c91e628d77a53288c06ee53d2893082) | Seller lists (10 USDC, 1 USDC eval fee) |
-| Self-Buy | [`0xa978e22c...`](https://sepolia.basescan.org/tx/0xa978e22cd8a1e991236572e107f824951810718d1bc217d0f7a6a7bf55e1c191) | Reverts with `CannotSelfBuy` |
-| Reserve | [`0x53708e2a...`](https://sepolia.basescan.org/tx/0x53708e2a18030ca5e8f6c1b6a51622517f0a85e35b6ba9afade72777276f04f1) | Buyer pays eval fee + provides pubkey |
-| Confirm | [`0x01692c1b...`](https://sepolia.basescan.org/tx/0x01692c1b1b4b8089fd8bd48ce8115830946314dc39c04672c656f983ae9f611c) | Buyer pays remaining 9 USDC |
-| Deliver | [`0x6f398e19...`](https://sepolia.basescan.org/tx/0x6f398e19c971ff9c9040c12b65e5fbb0b5e78f8de3f067542e6c9e6755c973d7) | Seller delivers encrypted key capsule |
+| List Memory | [`0x6d18082e...`](https://sepolia.basescan.org/tx/0x6d18082ee181c72ef6498dfa2eee5cfcbf16e593d929aabd2e1f4471b6649c50) | Seller lists (10 USDC, 1 USDC eval fee) |
+| Self-Buy | [`0x4f668da2...`](https://sepolia.basescan.org/tx/0x4f668da2263c7275602ccc419ef17aac20874a944d1e3aa71d41b59f6ba0259d) | Reverts with `CannotSelfBuy` |
+| Reserve | [`0xc78f4ce4...`](https://sepolia.basescan.org/tx/0xc78f4ce4e152679fde481ee2360232b91f7a32163abc519bf25e73c6a6ddfb00) | Buyer pays eval fee + provides pubkey |
+| Confirm | [`0xa6c59889...`](https://sepolia.basescan.org/tx/0xa6c598892ea163d413ba4f86d36fd3fc00e515b83870949fcb9ded5b84989221) | Buyer pays remaining 9 USDC |
+| Deliver | [`0x9fa845f5...`](https://sepolia.basescan.org/tx/0x9fa845f5161c7b1c49f878730249e0ba48f20991ed24998fa1c691ce34cfe3c6) | Seller delivers encrypted key capsule |
 
 ## Development
 

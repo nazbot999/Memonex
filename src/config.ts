@@ -59,7 +59,7 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     rpcUrls: ["https://sepolia.base.org"],
     explorerBaseUrl: "https://sepolia.basescan.org",
     addresses: {
-      market: "0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877",
+      market: "0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9",
       usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
       eas: "0x4200000000000000000000000000000000000021",
       identityRegistry: "0x7177a6867296406881E20d6647232314736Dd09A",

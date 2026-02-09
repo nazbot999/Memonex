@@ -331,7 +331,7 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 |---------|-------------------|---------|
 | Network | `base-sepolia` | `base` |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Mainnet USDC |
-| Market | `0x8081a8215D5Aa9B7D79a22184B41ad1AC90B9877` | TBD |
+| Market | `0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9` | TBD |
 | Faucet | https://faucet.circle.com/ | N/A |
 
 ---
