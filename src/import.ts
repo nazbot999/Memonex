@@ -197,6 +197,12 @@ function formatImprintMarkdown(
   return lines.join("\n");
 }
 
+function truncateForSummary(text: string, maxChars = 100): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars).trimEnd()}…`;
+}
+
 // ---------------------------------------------------------------------------
 // Imprint helpers: strength routing, ACTIVE-IMPRINTS.md, compatibility
 // ---------------------------------------------------------------------------
@@ -347,7 +353,9 @@ async function appendRegistryRecord(record: ImportRecord): Promise<void> {
  * 1. Verify integrity
  * 2. Write markdown to workspace
  * 3. Store in LanceDB via Gateway API
- * 4. Update import registry
+ * 4. Series + compatibility checks (imprints only)
+ * 5. Update import registry
+ * 6. Integrate purchase into agent memory files
  */
 export async function importMemoryPackage(
   pkg: MemoryPackage,
@@ -525,7 +533,115 @@ export async function importMemoryPackage(
   registry.records.push(record);
   await writeJsonFile(registryPath(), registry);
 
-  // ----- Step 6: Return result -----
+  // ----- Step 6: Integrate purchase into agent memory files -----
+  const purchasePriceLabel = opts.purchasePrice ?? "unknown";
+  const sellerAddressLabel = opts.sellerAddress ?? "unknown";
+  const purchaseDate = nowIso().slice(0, 10);
+
+  // Step A: Append summary to MEMORY.md
+  try {
+    const memoryPath = path.join(workspaceDir, "MEMORY.md");
+    let memoryContent = "";
+    let memoryExists = true;
+    try {
+      memoryContent = await fs.readFile(memoryPath, "utf8");
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        memoryExists = false;
+      } else {
+        throw err;
+      }
+    }
+
+    const summaryLines: string[] = [];
+    if (isImprint) {
+      const rarity = imprintMeta?.rarity ?? "common";
+      const strength = effectiveStrength ?? imprintMeta?.strength ?? "medium";
+      const traits = imprintMeta?.traits ?? workingPkg.topics;
+      summaryLines.push(`## Acquired Imprint: ${workingPkg.title}`);
+      summaryLines.push(
+        `> Rarity: ${rarity} | Strength: ${strength} | From: ${workingPkg.seller.agentName} | ${purchaseDate}`,
+      );
+      summaryLines.push(`> Traits: ${traits.join(", ")}`);
+      summaryLines.push(`> Imprint file: ${path.relative(workspaceDir, mdPath)}`);
+    } else {
+      summaryLines.push(`## Purchased: ${workingPkg.title}`);
+      summaryLines.push(
+        `> From: ${workingPkg.seller.agentName} (${sellerAddressLabel}) | ${purchasePriceLabel} USDC | ${purchaseDate}`,
+      );
+      summaryLines.push(`> Package: ${path.relative(workspaceDir, mdPath)}`);
+      summaryLines.push("");
+      summaryLines.push("Key insights:");
+      for (const insight of workingPkg.insights.slice(0, 5)) {
+        summaryLines.push(`- ${insight.title}: ${truncateForSummary(insight.content, 100)}`);
+      }
+    }
+
+    const baseContent = memoryExists ? memoryContent.trimEnd() : "# MEMORY.md";
+    const updatedContent = `${baseContent}\n\n${summaryLines.join("\n")}\n`;
+    await ensureDir(path.dirname(memoryPath));
+    await fs.writeFile(memoryPath, updatedContent, "utf8");
+  } catch (err: any) {
+    warnings.push(`Failed to update MEMORY.md: ${err?.message ?? String(err)}`);
+  }
+
+  // Step B: Log to daily note
+  try {
+    const dailyPath = path.join(workspaceDir, "memory", `${purchaseDate}.md`);
+    let dailyContent = "";
+    let dailyExists = true;
+    try {
+      dailyContent = await fs.readFile(dailyPath, "utf8");
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        dailyExists = false;
+      } else {
+        throw err;
+      }
+    }
+
+    const header = `# ${purchaseDate} — Session Notes\n`;
+    let updatedDaily = dailyExists ? dailyContent : header;
+    if (!updatedDaily.endsWith("\n")) updatedDaily += "\n";
+    updatedDaily += `- **Memonex purchase:** Bought "${workingPkg.title}" from ${workingPkg.seller.agentName} for ${purchasePriceLabel} USDC (memory/memonex/${workingPkg.packageId}.md)\n`;
+    await ensureDir(path.dirname(dailyPath));
+    await fs.writeFile(dailyPath, updatedDaily, "utf8");
+  } catch (err: any) {
+    warnings.push(`Failed to update daily note: ${err?.message ?? String(err)}`);
+  }
+
+  // Step C: First-time AGENTS.md hook
+  try {
+    const agentsPath = path.join(workspaceDir, "AGENTS.md");
+    let agentsContent: string | null = null;
+    try {
+      agentsContent = await fs.readFile(agentsPath, "utf8");
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        agentsContent = null;
+      } else {
+        throw err;
+      }
+    }
+
+    if (agentsContent !== null && !agentsContent.includes("memory/memonex/")) {
+      const block = [
+        "",
+        "## Memonex — Purchased Knowledge & Imprints",
+        "After each session start, check these files for purchased knowledge:",
+        "- Read `memory/memonex/ACTIVE-IMPRINTS.md` if it exists — these are acquired personality traits",
+        "- Knowledge packages in `memory/memonex/` contain insights from other agents. Key summaries are in MEMORY.md.",
+        "",
+      ].join("\n");
+      const updatedAgents = `${agentsContent.trimEnd()}${block}\n`;
+      await ensureDir(path.dirname(agentsPath));
+      await fs.writeFile(agentsPath, updatedAgents, "utf8");
+    }
+  } catch (err: any) {
+    warnings.push(`Failed to update AGENTS.md: ${err?.message ?? String(err)}`);
+  }
+
+  // ----- Step 7: Return result -----
   return {
     success: true,
     packageId: workingPkg.packageId,

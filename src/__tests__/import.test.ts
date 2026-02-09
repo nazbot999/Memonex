@@ -141,6 +141,137 @@ describe("all-blocked package fails", () => {
   });
 });
 
+describe("Step 6: memory integration", () => {
+  it("creates MEMORY.md with knowledge summary", async () => {
+    const pkg = makeKnowledgePackage({ title: "DeFi Alpha Strats" });
+    const result = await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+      sellerAddress: "0xseller",
+      purchasePrice: "10",
+    });
+
+    expect(result.success).toBe(true);
+    const memoryMd = await fs.readFile(path.join(TEST_WORKSPACE, "MEMORY.md"), "utf8");
+    expect(memoryMd).toContain("## Purchased: DeFi Alpha Strats");
+    expect(memoryMd).toContain(pkg.insights[0].title);
+    expect(memoryMd).toContain("test-agent");
+  });
+
+  it("appends to existing MEMORY.md without overwriting", async () => {
+    const seedContent = "# MEMORY.md\n\nSome existing notes about my agent life.\n";
+    await fs.mkdir(TEST_WORKSPACE, { recursive: true });
+    await fs.writeFile(path.join(TEST_WORKSPACE, "MEMORY.md"), seedContent, "utf8");
+
+    const pkg = makeKnowledgePackage({ title: "Appended Knowledge" });
+    await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+    });
+
+    const memoryMd = await fs.readFile(path.join(TEST_WORKSPACE, "MEMORY.md"), "utf8");
+    expect(memoryMd).toContain("Some existing notes about my agent life.");
+    expect(memoryMd).toContain("## Purchased: Appended Knowledge");
+  });
+
+  it("creates daily note with purchase line", async () => {
+    const pkg = makeKnowledgePackage({ title: "Daily Test Pkg" });
+    await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+      purchasePrice: "5",
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyPath = path.join(TEST_WORKSPACE, "memory", `${today}.md`);
+    const dailyContent = await fs.readFile(dailyPath, "utf8");
+    expect(dailyContent).toContain("Memonex purchase:");
+    expect(dailyContent).toContain("Daily Test Pkg");
+  });
+
+  it("appends memonex hook to existing AGENTS.md", async () => {
+    const agentsSeed = "# AGENTS.md\n\nSome existing agent rules.\n";
+    await fs.mkdir(TEST_WORKSPACE, { recursive: true });
+    await fs.writeFile(path.join(TEST_WORKSPACE, "AGENTS.md"), agentsSeed, "utf8");
+
+    const pkg = makeKnowledgePackage();
+    await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+    });
+
+    const agentsContent = await fs.readFile(path.join(TEST_WORKSPACE, "AGENTS.md"), "utf8");
+    expect(agentsContent).toContain("Memonex — Purchased Knowledge");
+    expect(agentsContent).toContain("memory/memonex/ACTIVE-IMPRINTS.md");
+  });
+
+  it("skips AGENTS.md when file doesn't exist", async () => {
+    const pkg = makeKnowledgePackage();
+    await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+    });
+
+    const agentsExists = await fs.access(path.join(TEST_WORKSPACE, "AGENTS.md")).then(() => true, () => false);
+    expect(agentsExists).toBe(false);
+  });
+
+  it("AGENTS.md hook is idempotent on 2nd import", async () => {
+    const agentsSeed = "# AGENTS.md\n\nRules.\n";
+    await fs.mkdir(TEST_WORKSPACE, { recursive: true });
+    await fs.writeFile(path.join(TEST_WORKSPACE, "AGENTS.md"), agentsSeed, "utf8");
+
+    const pkg1 = makeKnowledgePackage({ title: "First" });
+    await importMemoryPackage(pkg1, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+    });
+
+    const pkg2 = makeKnowledgePackage({ title: "Second" });
+    await importMemoryPackage(pkg2, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+    });
+
+    const agentsContent = await fs.readFile(path.join(TEST_WORKSPACE, "AGENTS.md"), "utf8");
+    const matches = agentsContent.match(/Memonex — Purchased Knowledge/g);
+    expect(matches).toHaveLength(1);
+  });
+
+  it("subtle imprint MEMORY.md path matches actual file location", async () => {
+    const pkg = makeImprintPackage({ imprintMeta: { strength: "subtle" } });
+    const result = await importMemoryPackage(pkg, {
+      workspacePath: TEST_WORKSPACE,
+      skipLanceDB: true,
+      skipIntegrityCheck: true,
+      skipPrivacyScan: true,
+      contentType: "imprint",
+    });
+
+    expect(result.success).toBe(true);
+
+    const memoryMd = await fs.readFile(path.join(TEST_WORKSPACE, "MEMORY.md"), "utf8");
+    const relativeMdPath = path.relative(TEST_WORKSPACE, result.markdownPath);
+    expect(memoryMd).toContain(relativeMdPath);
+    // The path must include archive for subtle-strength
+    expect(relativeMdPath).toContain("archive");
+  });
+});
+
 describe("imprint markdown format (C3)", () => {
   it("generates spec-aligned markdown sections", async () => {
     const pkg = makeImprintPackage({
