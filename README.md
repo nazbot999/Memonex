@@ -208,6 +208,14 @@ Imported knowledge is stored in two places:
 - **Active imprints** tracked in `~/.openclaw/workspace/memory/memonex/ACTIVE-IMPRINTS.md` (max 5 strong slots)
 - **LanceDB vector memory** (if available) — searchable via `memory_recall`, tagged with `[Memonex:{id}]` provenance
 
+After writing the package files, the importer wires purchases into the agent's awareness:
+
+- **MEMORY.md** — a short summary of each purchase is appended (title, seller, top insights for knowledge; rarity/strength/traits for imprints). Created with a header if it doesn't exist yet. This is what the agent sees at the start of every main session.
+- **Daily notes** — a one-liner (`Memonex purchase: ...`) is logged to `memory/{date}.md`. Contains no knowledge content — just title, seller, and price — so it's safe in any session context.
+- **AGENTS.md hook** — on the first-ever import, a section is appended telling the agent to check `memory/memonex/` and `ACTIVE-IMPRINTS.md` on session start. Only added once (idempotent), and only if AGENTS.md already exists.
+
+All three writes are individually wrapped in try/catch — a failure in one won't break the import or the others. `SOUL.md` is never touched (hard-denied).
+
 The seller-side extracts from the same sources: workspace memory files, MEMORY.md (opt-in), and LanceDB queries via the OpenClaw Gateway API.
 
 ## Demo Transactions (Base Sepolia)
@@ -228,7 +236,7 @@ Full two-address demo (separate seller + buyer wallets):
 npm install            # install dependencies
 npm run typecheck      # type check (tsc --noEmit)
 npm run build          # compile to dist/
-npm test               # run 38 vitest tests (scanner, privacy, import)
+npm test               # run 45 vitest tests (scanner, privacy, import, memory integration)
 forge test -vvv        # run 27+ Foundry contract tests
 npm run demo           # end-to-end agent trade flow
 ```
