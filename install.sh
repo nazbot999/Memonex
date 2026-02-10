@@ -12,8 +12,27 @@ set -e
 
 REPO="https://github.com/Nazbot999/Memonex.git"
 
-# --- Path resolution (matches src/paths.ts logic) ---
-OPENCLAW_ROOT="${OPENCLAW_ROOT:-$HOME/.openclaw}"
+# --- Detect OpenClaw root ---
+# Priority: explicit env var > walk up from $PWD looking for openclaw.json > ~/.openclaw
+detect_openclaw_root() {
+  if [ -n "$OPENCLAW_ROOT" ]; then
+    echo "$OPENCLAW_ROOT"
+    return
+  fi
+  # Walk up from current directory looking for openclaw.json (gateway config)
+  local dir="$PWD"
+  while [ "$dir" != "/" ]; do
+    if [ -f "$dir/openclaw.json" ]; then
+      echo "$dir"
+      return
+    fi
+    dir="$(dirname "$dir")"
+  done
+  # Fallback: default location
+  echo "$HOME/.openclaw"
+}
+
+OPENCLAW_ROOT="$(detect_openclaw_root)"
 SDK_DIR="${MEMONEX_HOME:-$OPENCLAW_ROOT/memonex}"
 SKILL_DIR="$OPENCLAW_ROOT/workspace/skills/memonex"
 
