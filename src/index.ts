@@ -5,6 +5,7 @@
 
 export * from "./types.js";
 export * from "./utils.js";
+export * from "./paths.js";
 export * from "./privacy.js";
 export * from "./memory.js";
 export * from "./preview.js";

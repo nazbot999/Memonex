@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
 import { ensureDir, readJsonFile, writeJsonFile } from "./utils.js";
+import { getIpfsMockDir } from "./paths.js";
 
 export type IpfsUploadResult = { cid: string; uri: string };
 
@@ -111,7 +111,7 @@ class PinataIpfsClient implements IpfsClient {
 // ---------------------------------------------------------------------------
 
 class MockIpfsClient implements IpfsClient {
-  private baseDir = path.join(os.homedir(), ".openclaw", "memonex", "ipfs-mock");
+  private get baseDir(): string { return getIpfsMockDir(); }
 
   async uploadJSON(obj: unknown, name: string): Promise<IpfsUploadResult> {
     await ensureDir(this.baseDir);

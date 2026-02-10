@@ -1,8 +1,7 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
 
 import type { GatewayConfig } from "./types.js";
+import { getGatewayConfigPath } from "./paths.js";
 
 const GATEWAY_TIMEOUT_MS = 5000;
 
@@ -15,7 +14,7 @@ export function resolveGatewayConfig(): Promise<GatewayConfig | null> {
 }
 
 async function resolveGatewayConfigSync(): Promise<GatewayConfig | null> {
-  const configPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
+  const configPath = getGatewayConfigPath();
   try {
     const raw = await fs.readFile(configPath, "utf8");
     const config = JSON.parse(raw);

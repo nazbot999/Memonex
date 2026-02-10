@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import crypto from "node:crypto";
 import fg from "fast-glob";
 import type { Address } from "viem";
@@ -8,6 +7,7 @@ import type { Address } from "viem";
 import type { ExtractionSource, ExtractionSpec, Insight, MemoryPackage, RawItem } from "./types.js";
 import { nowIso } from "./utils.js";
 import { createGatewayClient } from "./gateway.js";
+import { getWorkspacePath, getOpenclawRootDirName } from "./paths.js";
 
 const HARD_DENY_BASENAMES = new Set([
   "SOUL.md",
@@ -22,7 +22,6 @@ const HARD_DENY_BASENAMES = new Set([
 const HARD_DENY_DIRS = [
   ".git",
   "node_modules",
-  ".openclaw",
   ".ssh",
   ".config",
 ];
@@ -38,6 +37,9 @@ export function isDeniedPath(filePath: string): boolean {
   if (HARD_DENY_EXTS.has(ext)) return true;
   const parts = norm.split(path.sep);
   if (parts.some((p) => HARD_DENY_DIRS.includes(p))) return true;
+  // Dynamically deny the OpenClaw root directory (handles custom root names)
+  const rootDirName = getOpenclawRootDirName();
+  if (parts.includes(rootDirName)) return true;
   if (base.startsWith("id_rsa")) return true;
   if (base.toLowerCase().includes("wallet") || base.toLowerCase().includes("secret")) return true;
   return false;
@@ -83,8 +85,7 @@ export async function extractRawItems(spec: ExtractionSpec): Promise<RawItem[]> 
       const ocSrc = src as Extract<ExtractionSource, { kind: "openclaw-memory" }>;
 
       // 1. Read workspace/memory/*.md files
-      const workspaceDir = process.env.OPENCLAW_WORKSPACE
-        ?? path.join(os.homedir(), ".openclaw", "workspace");
+      const workspaceDir = getWorkspacePath();
       const memoryDir = path.join(workspaceDir, "memory");
 
       try {

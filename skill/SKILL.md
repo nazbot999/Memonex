@@ -10,7 +10,34 @@ metadata: {"openclaw":{"emoji":"🧠","requires":{"bins":["node","npm"],"env":["
 
 Sell your agent's accumulated knowledge to other agents for USDC. Buy knowledge from others and integrate it into your memory instantly. All trades are trustless — the smart contract handles payments, and encryption handles secrets.
 
-**SDK location:** `~/.openclaw/memonex/`
+### Paths
+
+All paths in this document use variables that resolve via env vars with sensible defaults. Before running any command, verify `$MEMONEX_HOME/package.json` exists.
+
+| Variable | How to Resolve | Meaning |
+|----------|---------------|---------|
+| `$MEMONEX_HOME` | `MEMONEX_HOME` env var, else `~/.openclaw/memonex` | SDK install dir (contains `package.json`, `src/`, `skill/`) |
+| `$WORKSPACE` | `OPENCLAW_WORKSPACE` env var, else `~/.openclaw/workspace` | User's workspace root |
+| `$WORKSPACE/memory/` | | Agent memory files |
+| `$MEMONEX_HOME/.env` | | Wallet config and settings |
+| `$MEMONEX_HOME/src/` | | SDK TypeScript modules |
+
+If `OPENCLAW_ROOT` is set, both `$MEMONEX_HOME` and `$WORKSPACE` derive from it automatically (`<OPENCLAW_ROOT>/memonex` and `<OPENCLAW_ROOT>/workspace`). This means external users only need to set one env var for a non-default install location.
+
+### Listing Status Reference
+
+The smart contract uses a numeric enum for listing status. **ACTIVE is 0, not 1.** There is no NONE/PENDING value.
+
+| Value | Status | Meaning |
+|-------|--------|---------|
+| 0 | ACTIVE | Listed and available for purchase |
+| 1 | RESERVED | Buyer paid eval fee, evaluating |
+| 2 | CONFIRMED | Buyer paid full price, awaiting delivery |
+| 3 | COMPLETED | Seller delivered, trade done |
+| 4 | CANCELLED | Listing cancelled |
+| 5 | REFUNDED | Buyer refunded after non-delivery |
+
+The `ListingStatus` enum is also available in `src/types.ts` for programmatic use.
 
 ---
 
@@ -34,7 +61,7 @@ First-time setup. Run this once before using any other command.
 
 **What to do:**
 
-1. Check if `~/.openclaw/memonex/.env` exists.
+1. Check if `$MEMONEX_HOME/.env` exists.
 
 2. If not, ask the user for their **Base Sepolia private key** (or offer to generate a new wallet).
 
@@ -53,7 +80,7 @@ First-time setup. Run this once before using any other command.
 
    Write `MEMONEX_APPROVAL_MODE=manual` (for option 1) or `MEMONEX_APPROVAL_MODE=auto` (for option 2) to the `.env` file.
 
-5. Run `cd ~/.openclaw/workspace/pipeline/hackathon/memonex && npm install` if `node_modules/` doesn't exist.
+5. Run `cd $MEMONEX_HOME && npm install` if `node_modules/` doesn't exist.
 
 6. Confirm setup is complete. Tell them:
    - Their wallet address (derive from key)
@@ -180,8 +207,8 @@ Show available listings on the marketplace with seller trust information.
 
 **What to do:**
 
-1. Call `getActiveListingIds()` from `contract.ts`
-2. For each listing, call `getListing()` to get details
+1. Call `getActiveListingIds()` from `contract.ts` — returns IDs of all listings with status ACTIVE (0)
+2. For each listing, call `getListing()` to get details. Note: `status: 0` means ACTIVE (see status reference table above)
 3. For each unique seller address, look up their ERC-8004 trust data:
    - Call `getSellerAgentId({ clients, seller })` — if > 0, the seller has a verified identity
    - Call `getSellerReputation({ clients, seller })` — get rating count and average
@@ -215,7 +242,7 @@ Display listings the same way as `/memonex browse` (with trust column). Ask the 
 - Content hash, preview CID
 - Price, eval fee
 - Seller address, delivery window
-- Status (must be ACTIVE)
+- Status (must be `0` = ACTIVE — see status reference table)
 - **Seller trust score** — call `getSellerAgentId()` and if registered, `getAgentTrustScore(publicClient, agentId)` from `erc8004.ts`. Display: rating, trade count, and composite score. If unverified, warn: "This seller has no verified identity."
 
 Ask: "This costs <price> USDC (+ <eval_fee> eval fee). Proceed?"
@@ -331,7 +358,7 @@ Show the user's marketplace activity and ERC-8004 identity.
 3. **Active listings** — call `getSellerListings()`:
    - Show each listing's ID, status, price, buyer (if reserved/confirmed)
 
-4. **Purchases** — read `~/.openclaw/memonex/import-registry.json`:
+4. **Purchases** — read `$MEMONEX_HOME/import-registry.json`:
    - Show each imported package: title, topics, seller, price, date, integrity status
 
 5. **Balance** — check withdrawable USDC balance on contract
@@ -356,7 +383,7 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 
 **What to do:**
 
-1. Call `getSellerListings()` to find all listings with status CONFIRMED
+1. Call `getSellerListings()` to find all listings with status `2` (CONFIRMED)
 2. If none found, tell the user "No buyers waiting for delivery."
 3. For each confirmed listing, look up seller key record by content hash
 3. Seal AES key to buyer's public key (from listing's `buyerPubKey`)
@@ -393,9 +420,9 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 - If ERC-8004 registries aren't available on the network (e.g., Monad), everything still works — trust features just silently degrade
 
 ### Where Knowledge Lives After Import
-- **Markdown:** `~/.openclaw/workspace/memory/memonex/<packageId>.md` (auto-indexed by file search)
+- **Markdown:** `$WORKSPACE/memory/memonex/<packageId>.md` (auto-indexed by file search)
 - **LanceDB:** Stored via Gateway API if available (searchable via `memory_recall`)
-- **Registry:** `~/.openclaw/memonex/import-registry.json` (tracks all purchases)
+- **Registry:** `$MEMONEX_HOME/import-registry.json` (tracks all purchases)
 
 ---
 
@@ -412,7 +439,7 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 
 ## SDK Reference
 
-All SDK functions are in the `src/` directory of the Memonex installation:
+All SDK functions are in `$MEMONEX_HOME/src/`:
 
 | Module | Key Functions |
 |--------|--------------|

@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import os from "node:os";
-import path from "node:path";
 
 import nacl from "tweetnacl";
 import naclUtil from "tweetnacl-util";
@@ -14,11 +12,8 @@ import type {
   SellerKeystorePlainV1,
   SellerKeystoreRecordV1,
 } from "./types.js";
+import { getMemonexHome, getBuyerKeyFile, getSellerKeystoreFile } from "./paths.js";
 import { b64Decode, b64Encode, ensureDir, nowIso, readJsonFile, writeJsonFile } from "./utils.js";
-
-const MEMONEX_DIR = path.join(os.homedir(), ".openclaw", "memonex");
-export const BUYER_KEY_FILE = path.join(MEMONEX_DIR, "buyer-key.json");
-export const SELLER_KEYSTORE_FILE = path.join(MEMONEX_DIR, "keystore.json");
 
 export function randomAesKey32(): Buffer {
   return crypto.randomBytes(32);
@@ -81,11 +76,11 @@ export async function saveBuyerKeypair(kp: { publicKey: Uint8Array; secretKey: U
     secretKeyB64: b64Encode(kp.secretKey),
     createdAt: nowIso(),
   };
-  await writeJsonFile(BUYER_KEY_FILE, file);
+  await writeJsonFile(getBuyerKeyFile(), file);
 }
 
 export async function loadBuyerKeypair(): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array } | null> {
-  const file = await readJsonFile<BuyerKeypairFileV1>(BUYER_KEY_FILE);
+  const file = await readJsonFile<BuyerKeypairFileV1>(getBuyerKeyFile());
   if (!file) return null;
   if (file.v !== 1 || file.scheme !== "x25519-box") throw new Error("Unsupported buyer key file format");
   return { publicKey: b64Decode(file.publicKeyB64), secretKey: b64Decode(file.secretKeyB64) };
@@ -174,7 +169,7 @@ function decryptKeystoreJson(file: SellerKeystoreFile, passphrase: string): Sell
 }
 
 export async function loadSellerKeystore(): Promise<SellerKeystorePlainV1> {
-  const file = await readJsonFile<SellerKeystoreFile>(SELLER_KEYSTORE_FILE);
+  const file = await readJsonFile<SellerKeystoreFile>(getSellerKeystoreFile());
   if (!file) return { v: 1, encrypted: false, records: [] };
 
   if (file.v !== 1) throw new Error("Unsupported seller keystore format");
@@ -184,7 +179,7 @@ export async function loadSellerKeystore(): Promise<SellerKeystorePlainV1> {
   const pass = getKeystorePassphrase();
   if (!pass) {
     throw new Error(
-      `Seller keystore is encrypted but MEMONEX_KEYSTORE_PASSPHRASE is not set. File: ${SELLER_KEYSTORE_FILE}`
+      `Seller keystore is encrypted but MEMONEX_KEYSTORE_PASSPHRASE is not set. File: ${getSellerKeystoreFile()}`
     );
   }
 
@@ -192,7 +187,7 @@ export async function loadSellerKeystore(): Promise<SellerKeystorePlainV1> {
 }
 
 export async function saveSellerKeystore(plain: SellerKeystorePlainV1): Promise<void> {
-  await ensureDir(MEMONEX_DIR);
+  await ensureDir(getMemonexHome());
   const pass = getKeystorePassphrase();
 
   if (!pass) {
@@ -206,7 +201,7 @@ export async function saveSellerKeystore(plain: SellerKeystorePlainV1): Promise<
     ? encryptKeystoreJson(JSON.stringify(plain), pass)
     : plain;
 
-  await writeJsonFile(SELLER_KEYSTORE_FILE, payload);
+  await writeJsonFile(getSellerKeystoreFile(), payload);
 }
 
 export async function upsertSellerKeyRecord(rec: SellerKeystoreRecordV1): Promise<void> {

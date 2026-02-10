@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 
 import type {
   ImportOptions,
@@ -25,17 +24,9 @@ import {
 } from "./import.scanner.js";
 import { scanForPrivacy, applyPrivacyActions } from "./privacy.scanner.js";
 import { createGatewayClient, gatewayMemoryStore } from "./gateway.js";
+import { getWorkspacePath, getImportRegistryPath } from "./paths.js";
 
 const LANCE_DB_BATCH_DELAY_MS = 100;
-
-function defaultWorkspacePath(): string {
-  return process.env.OPENCLAW_WORKSPACE
-    ?? path.join(os.homedir(), ".openclaw", "workspace");
-}
-
-function registryPath(): string {
-  return path.join(os.homedir(), ".openclaw", "memonex", "import-registry.json");
-}
 
 function emptySafetyReport(): ImportSafetyReport {
   return {
@@ -328,7 +319,7 @@ function checkSeriesProgress(
 // ---------------------------------------------------------------------------
 
 async function loadRegistry(): Promise<ImportRegistry> {
-  const existing = await readJsonFile<ImportRegistry>(registryPath());
+  const existing = await readJsonFile<ImportRegistry>(getImportRegistryPath());
   if (existing && existing.version === 1 && Array.isArray(existing.records)) {
     return existing;
   }
@@ -338,7 +329,7 @@ async function loadRegistry(): Promise<ImportRegistry> {
 async function appendRegistryRecord(record: ImportRecord): Promise<void> {
   const registry = await loadRegistry();
   registry.records.push(record);
-  await writeJsonFile(registryPath(), registry);
+  await writeJsonFile(getImportRegistryPath(), registry);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +443,7 @@ export async function importMemoryPackage(
   }
 
   // ----- Step 2: Write markdown to workspace -----
-  const workspaceDir = opts.workspacePath ?? defaultWorkspacePath();
+  const workspaceDir = opts.workspacePath ?? getWorkspacePath();
   const imprintMeta = isImprintMeta(workingPkg.meta) ? workingPkg.meta : undefined;
   const isImprint = opts.contentType === "imprint" || Boolean(imprintMeta);
 
@@ -531,7 +522,7 @@ export async function importMemoryPackage(
   };
 
   registry.records.push(record);
-  await writeJsonFile(registryPath(), registry);
+  await writeJsonFile(getImportRegistryPath(), registry);
 
   // ----- Step 6: Integrate purchase into agent memory files -----
   const purchasePriceLabel = opts.purchasePrice ?? "unknown";
