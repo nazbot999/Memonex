@@ -23,7 +23,7 @@ import {
 } from "./contract.js";
 import { extractRawItems, curateInsights, buildMemoryPackage } from "./memory.js";
 import { sanitizeInsights } from "./privacy.js";
-import { generatePreview } from "./preview.js";
+import { buildBothPreviews } from "./preview.builder.js";
 import { createIpfsClient } from "./ipfs.js";
 import {
   getAgentTrustScore,
@@ -195,17 +195,13 @@ async function main(): Promise<void> {
   const evalFeeUSDC = parseUsdc(process.env.MEMONEX_DEMO_EVAL_FEE_USDC ?? "0");
   const deliveryWindowSec = Number(process.env.MEMONEX_DEMO_DELIVERY_WINDOW_SEC ?? "21600"); // 6h
 
-  const preview = generatePreview({
-    market: MEMONEX_MARKET,
-    contentHash,
-    priceUSDC,
-    evalFeeUSDC,
+  const previews = buildBothPreviews(pkg, {
+    price: formatUsdc(priceUSDC),
+    evalFeePct: evalFeeUSDC > 0n ? Number((evalFeeUSDC * 10000n) / priceUSDC) / 100 : 0,
     deliveryWindowSec,
-    memoryPackage: pkg,
-    leakageRiskScore: report.leakageRiskScore,
   });
 
-  const previewUp = await ipfs.uploadJSON(preview, `preview-${pkg.packageId}.json`);
+  const previewUp = await ipfs.uploadJSON(previews.eval, `preview-${pkg.packageId}.json`);
   const envelopeUp = await ipfs.uploadJSON(envelope, `envelope-${pkg.packageId}.json`);
 
   console.log("Uploaded:");

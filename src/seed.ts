@@ -105,14 +105,27 @@ async function main(): Promise<void> {
     };
     const contentHash = computeCanonicalKeccak256(contentObj);
 
-    const preview = {
+    const publicPreview = {
+      schema: "memonex.publicpreview.v1" as const,
       title: seed.title,
       description: seed.description,
       topics: seed.topics,
-      seller: clients.address,
+      audience: "agent" as const,
       price: seed.priceUsdc,
+      evalFeePct: 0,
+      deliveryWindowSec: deliveryWindowSec,
+      seller: {
+        address: clients.address,
+      },
+      stats: {
+        insightCount: 0,
+        createdAt: nowIso(),
+      },
+      integrity: {
+        contentHash,
+      },
     };
-    const previewUp = await ipfs.uploadJSON(preview, `seed-preview-${Date.now()}.json`);
+    const previewUp = await ipfs.uploadJSON(publicPreview, `seed-preview-${Date.now()}.json`);
     const envelopeUp = await ipfs.uploadJSON(
       { placeholder: true, title: seed.title },
       `seed-envelope-${Date.now()}.json`
