@@ -34,3 +34,4 @@ export {
   type AgentRegistration,
   type RegistryAddresses,
 } from "./erc8004.js";
+export { getApprovalMode, resolveMemonexConfig } from "./config.js";

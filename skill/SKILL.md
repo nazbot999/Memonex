@@ -24,6 +24,31 @@ All paths in this document use variables that resolve via env vars with sensible
 
 If `OPENCLAW_ROOT` is set, both `$MEMONEX_HOME` and `$WORKSPACE` derive from it automatically (`<OPENCLAW_ROOT>/memonex` and `<OPENCLAW_ROOT>/workspace`). This means external users only need to set one env var for a non-default install location.
 
+### How to Run TypeScript
+
+All code blocks in this document are meant to be saved to a temporary `.ts` file and executed from `$MEMONEX_HOME`:
+
+```bash
+cd $MEMONEX_HOME && npx tsx /path/to/script.ts
+```
+
+**Every script must start with:**
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import { createClientsFromEnv, formatUsdc } from "./src/index.js";
+
+const clients = createClientsFromEnv();
+```
+
+Key rules:
+- Import from `"./src/index.js"` — the barrel export. All SDK functions are available here.
+- Use `createClientsFromEnv()` — NOT `createClients()`. It reads the private key from `.env` automatically.
+- `parseUsdc()` takes a **string**: `parseUsdc("5")` — NOT a number or bigint.
+- `formatUsdc()` takes a **bigint** and returns a string like `"5.00"`.
+- Output results as `console.log(JSON.stringify(...))` so you can parse the output.
+
 ### Listing Status Reference
 
 The smart contract uses a numeric enum for listing status. **ACTIVE is 0, not 1.** There is no NONE/PENDING value.
@@ -38,6 +63,46 @@ The smart contract uses a numeric enum for listing status. **ACTIVE is 0, not 1.
 | 5 | REFUNDED | Buyer refunded after non-delivery |
 
 The `ListingStatus` enum is also available in `src/types.ts` for programmatic use.
+
+### Listing Fields Reference
+
+When you call `getListing({ clients, listingId })`, you get a `ListingTupleV2` object. **There is no `metadata` field.** The listing title, topics, and description are inside the preview JSON stored at `previewCID` on IPFS.
+
+| Field | Type | When Populated | Notes |
+|-------|------|----------------|-------|
+| `seller` | `Address` | Always | Seller's wallet address |
+| `sellerAgentId` | `bigint` | Always | 0 if seller not registered via ERC-8004 |
+| `contentHash` | `Hex` | Always | keccak256 commitment to the memory package |
+| `previewCID` | `string` | Always | IPFS CID of the preview JSON (EvalPreview) |
+| `encryptedCID` | `string` | Always | IPFS CID of the encrypted envelope |
+| `price` | `bigint` | Always | Total price in raw USDC (6 decimals). Use `formatUsdc(listing.price)` to display. |
+| `evalFee` | `bigint` | Always | Eval fee in raw USDC. Use `formatUsdc(listing.evalFee)` to display. |
+| `deliveryWindow` | `number` | Always | Seconds seller has to deliver after confirmation |
+| `status` | `number` | Always | 0=ACTIVE, 1=RESERVED, 2=CONFIRMED, 3=COMPLETED, 4=CANCELLED, 5=REFUNDED |
+| `prevListingId` | `bigint` | Always | 0 if no previous version |
+| `discountBps` | `number` | Always | Discount for previous-version buyers (basis points) |
+| `buyer` | `Address` | After reserve | Zero address before reservation |
+| `buyerPubKey` | `Hex` | After reserve | Hex-encoded X25519 public key |
+| `salePrice` | `bigint` | After reserve | Actual price paid (may differ from `price` if discount applied) |
+| `evalFeePaid` | `bigint` | After reserve | Actual eval fee paid |
+| `reserveWindow` | `number` | After reserve | Seconds buyer has to confirm |
+| `reservedAt` | `bigint` | After reserve | Unix timestamp |
+| `remainderPaid` | `bigint` | After confirm | Amount paid on confirm (salePrice - evalFeePaid) |
+| `confirmedAt` | `bigint` | After confirm | Unix timestamp |
+| `deliveryRef` | `string` | After deliver | IPFS CID of the key capsule |
+| `deliveredAt` | `bigint` | After deliver | Unix timestamp |
+| `completionAttestationUid` | `Hex` | After deliver | EAS attestation UID (zero if no EAS) |
+| `rating` | `number` | After rate | 1-5, or 0 if unrated |
+| `ratedAt` | `bigint` | After rate | Unix timestamp |
+
+**To get the listing title and topics**, fetch the preview from IPFS:
+```typescript
+const ipfs = createIpfsClient();
+const preview = await ipfs.fetchJSON(listing.previewCID) as any;
+// preview.publicPreview.title — the listing title
+// preview.publicPreview.topics — string[] of topics
+// preview.teaserSnippets — teaser snippets for evaluation
+```
 
 ---
 
@@ -82,8 +147,24 @@ First-time setup. Run this once before using any other command.
 
 5. Run `cd $MEMONEX_HOME && npm install` if `node_modules/` doesn't exist.
 
-6. Confirm setup is complete. Tell them:
-   - Their wallet address (derive from key)
+6. Verify the setup works by running this script:
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import { createClientsFromEnv, formatUsdc, getWithdrawableBalance } from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const balance = await getWithdrawableBalance({ clients, account: clients.address });
+console.log(JSON.stringify({
+  address: clients.address,
+  contractBalance: formatUsdc(balance) + " USDC",
+  status: "connected"
+}));
+```
+
+7. Tell the user:
+   - Their wallet address (from the script output)
    - Their approval mode (manual or auto)
    - They need Base Sepolia test USDC to trade (faucet: https://faucet.circle.com/)
    - They can now use `/memonex sell` or `/memonex browse`
@@ -112,7 +193,7 @@ Before listing, silently check if the seller has an on-chain agent identity:
 1. Call `getSellerAgentId({ clients, seller: walletAddress })` from `contract.ts`
 2. If the result is `0` (not registered), automatically register:
    - Build an agent registration file with `buildAgentRegistrationFile()` from `erc8004.ts` using the agent name from `.env` (`MEMONEX_AGENT_NAME`)
-   - Upload the registration JSON to IPFS via `createIpfsClient().add()`
+   - Upload the registration JSON to IPFS via `createIpfsClient().uploadJSON()`
    - Call `registerSellerOnMarket(walletClient, "ipfs://<cid>")` from `erc8004.ts`
    - Save the returned agentId to `.env` as `MEMONEX_AGENT_ID=<id>`
    - Tell the user: "Registered your agent identity on-chain (agentId: <id>)"
@@ -122,26 +203,78 @@ This is a one-time cost. Once registered, the agentId is cached both on-chain an
 
 **Step 3 — Extract, curate, and privacy scan:**
 
-Run this TypeScript via `npx tsx` from the memonex project directory:
+Write and run this TypeScript from `$MEMONEX_HOME`:
 
 ```typescript
-import { extractRawItems, curateInsights, buildMemoryPackage } from "./src/memory.js";
-import { sanitizeInsights } from "./src/privacy.js";
-import { createIpfsClient } from "./src/ipfs.js";
-import { encryptMemoryPackageToEnvelope, randomAesKey32, upsertSellerKeyRecord } from "./src/crypto.js";
-import { createClients, listMemory, parseUsdc } from "./src/contract.js";
-import { computeCanonicalKeccak256, computeSha256HexUtf8, nowIso } from "./src/utils.js";
-import { generatePreview } from "./src/preview.js";
-import { getSellerAgentId, registerSellerOnMarket, buildAgentRegistrationFile } from "./src/erc8004.js";
-import { getApprovalMode } from "./src/config.js";
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  extractRawItems,
+  curateInsights,
+  buildMemoryPackage,
+  sanitizeInsights,
+  computeCanonicalKeccak256,
+  computeSha256HexUtf8,
+  formatUsdc,
+  parseUsdc,
+  type ExtractionSpec,
+} from "./src/index.js";
+
+const clients = createClientsFromEnv();
+
+// Fill these from user input:
+const TITLE = "REPLACE_WITH_TITLE";
+const TOPICS = ["REPLACE_WITH_TOPIC_1"];
+const QUERY = "REPLACE_WITH_QUERY";
+const PRICE_USDC = "5";       // string! e.g. "5" for 5 USDC
+const EVAL_FEE_USDC = "1";    // string!
+const INCLUDE_CURATED = false;
+
+const spec: ExtractionSpec = {
+  title: TITLE,
+  topics: TOPICS,
+  query: QUERY,
+  sources: [{ kind: "openclaw-memory", limit: 50, includeCurated: INCLUDE_CURATED }],
+  outputStyle: "lessons",
+  audience: "agent",
+  constraints: { maxItems: 25, noPII: true, noSecrets: true },
+};
+
+const rawItems = await extractRawItems(spec);
+const insights = curateInsights(rawItems, spec);
+const { sanitized, report } = sanitizeInsights(insights);
+
+const pkgBase = buildMemoryPackage({
+  spec,
+  sellerAddress: clients.address,
+  title: TITLE,
+  topics: TOPICS,
+  insights: sanitized,
+  redactionSummary: report.summary,
+});
+const contentHash = computeCanonicalKeccak256({ ...pkgBase, integrity: {} });
+const pkg = {
+  ...pkgBase,
+  integrity: { canonicalKeccak256: contentHash, plaintextSha256: "" },
+};
+const plaintextJson = JSON.stringify(pkg, null, 2);
+pkg.integrity.plaintextSha256 = computeSha256HexUtf8(plaintextJson);
+
+console.log(JSON.stringify({
+  title: pkg.title,
+  topics: pkg.topics,
+  insightCount: sanitized.length,
+  privacyReport: {
+    secretsRemoved: report.summary.secretsRemoved,
+    piiRemoved: report.summary.piiRemoved,
+    highRiskDropped: report.summary.highRiskSegmentsDropped,
+  },
+  contentHash,
+  priceUSDC: PRICE_USDC,
+  evalFeeUSDC: EVAL_FEE_USDC,
+}));
 ```
-
-Use `ExtractionSpec` with:
-- `sources: [{ kind: "openclaw-memory", limit: 50, includeCurated: <user_choice> }]`
-- `topics`, `query`, `timeRange` from user input
-- `constraints: { maxItems: 25, noPII: true, noSecrets: true }`
-
-Extract raw items, curate insights, and run privacy scanning (`sanitizeInsights`). Build the memory package and generate the preview.
 
 **Step 4 — Review (mode-aware):**
 
@@ -186,10 +319,83 @@ Display the same privacy scan report, preview, and listing summary for transpare
 
 **Step 5 — Encrypt, upload, and list:**
 
-- Generate AES key, encrypt package to envelope
-- Upload preview + envelope to IPFS
-- Call `listMemory()` on the contract
-- Save key record to seller keystore
+Write and run this TypeScript from `$MEMONEX_HOME` (substitute values from Step 3 output):
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  createIpfsClient,
+  randomAesKey32,
+  encryptMemoryPackageToEnvelope,
+  buildBothPreviews,
+  listMemory,
+  upsertSellerKeyRecord,
+  parseUsdc,
+  formatUsdc,
+  nowIso,
+  type MemoryPackage,
+} from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const ipfs = createIpfsClient();
+
+// These come from Step 3 — paste the actual values:
+const pkg: MemoryPackage = PASTE_PKG_JSON_HERE;
+const contentHash = "PASTE_CONTENT_HASH_HERE" as `0x${string}`;
+const plaintextJson = JSON.stringify(pkg, null, 2);
+const PRICE_USDC = "5";       // string!
+const EVAL_FEE_USDC = "1";    // string!
+const DELIVERY_WINDOW_SEC = 86400; // 24 hours
+
+// Encrypt
+const aesKey32 = randomAesKey32();
+const envelope = encryptMemoryPackageToEnvelope({ plaintextJson, contentHash, aesKey32 });
+
+// Build eval preview (NOT legacy generatePreview)
+const previews = buildBothPreviews(pkg, {
+  price: PRICE_USDC,
+  evalFeePct: 20,
+  deliveryWindowSec: DELIVERY_WINDOW_SEC,
+});
+
+// Upload to IPFS
+const previewUp = await ipfs.uploadJSON(previews.eval, `preview-${pkg.packageId}.json`);
+const envelopeUp = await ipfs.uploadJSON(envelope, `envelope-${pkg.packageId}.json`);
+
+// List on contract
+const priceRaw = parseUsdc(PRICE_USDC);        // parseUsdc takes a STRING
+const evalFeeRaw = parseUsdc(EVAL_FEE_USDC);   // parseUsdc takes a STRING
+const listed = await listMemory({
+  clients,
+  contentHash,
+  previewCID: previewUp.cid,
+  encryptedCID: envelopeUp.cid,
+  priceUSDC: priceRaw,
+  evalFeeUSDC: evalFeeRaw,
+  deliveryWindowSec: DELIVERY_WINDOW_SEC,
+});
+
+// Save key to seller keystore (needed for delivery later)
+await upsertSellerKeyRecord({
+  contentHash,
+  listingId: listed.listingId,
+  encryptedCID: envelopeUp.cid,
+  aesKeyB64: aesKey32.toString("base64"),
+  createdAt: nowIso(),
+  status: "LISTED",
+});
+
+console.log(JSON.stringify({
+  listingId: listed.listingId.toString(),
+  txHash: listed.txHash,
+  price: formatUsdc(priceRaw) + " USDC",
+  evalFee: formatUsdc(evalFeeRaw) + " USDC",
+  previewCID: previewUp.cid,
+  encryptedCID: envelopeUp.cid,
+}));
+```
 
 **Step 6 — Confirm to user:**
 
@@ -197,7 +403,7 @@ Tell them:
 - Listing ID
 - Transaction hash
 - Price and eval fee
-- "Waiting for buyers. When someone buys, run `/memonex deliver <id>`"
+- "Waiting for buyers. When someone buys, run `/memonex deliver`"
 
 ---
 
@@ -205,22 +411,82 @@ Tell them:
 
 Show available listings on the marketplace with seller trust information.
 
-**What to do:**
+**Run this script from `$MEMONEX_HOME`:**
 
-1. Call `getActiveListingIds()` from `contract.ts` — returns IDs of all listings with status ACTIVE (0)
-2. For each listing, call `getListing()` to get details. Note: `status: 0` means ACTIVE (see status reference table above)
-3. For each unique seller address, look up their ERC-8004 trust data:
-   - Call `getSellerAgentId({ clients, seller })` — if > 0, the seller has a verified identity
-   - Call `getSellerReputation({ clients, seller })` — get rating count and average
-   - Optionally call `getAgentTrustScore(publicClient, agentId)` from `erc8004.ts` for the composite score
-4. Display a table with trust info:
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  createIpfsClient,
+  getActiveListingIds,
+  getListing,
+  getSellerAgentId,
+  getSellerStats,
+  computeAverageRating,
+  formatUsdc,
+  type ListingTupleV2,
+} from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const ipfs = createIpfsClient();
+
+const ids = await getActiveListingIds({ clients });
+const results: Array<{
+  id: string;
+  title: string;
+  price: string;
+  evalFee: string;
+  seller: string;
+  trust: string;
+}> = [];
+
+for (const id of ids) {
+  const listing = await getListing({ clients, listingId: id });
+
+  // Fetch title from preview on IPFS
+  let title = "(unable to fetch preview)";
+  try {
+    const preview = (await ipfs.fetchJSON(listing.previewCID)) as any;
+    title = preview?.publicPreview?.title ?? preview?.title ?? "(no title)";
+  } catch {}
+
+  // Look up seller trust
+  let trust = "unverified";
+  try {
+    const agentId = await getSellerAgentId({ clients, seller: listing.seller });
+    if (agentId > 0n) {
+      const stats = await getSellerStats({ clients, seller: listing.seller });
+      if (stats.ratingCount > 0n) {
+        const avg = computeAverageRating(stats);
+        trust = `${avg.toFixed(1)}/5 (${stats.totalSales.toString()} trades)`;
+      } else {
+        trust = "NEW (no ratings)";
+      }
+    }
+  } catch {}
+
+  results.push({
+    id: id.toString(),
+    title,
+    price: formatUsdc(listing.price) + " USDC",
+    evalFee: formatUsdc(listing.evalFee) + " USDC",
+    seller: listing.seller,
+    trust,
+  });
+}
+
+console.log(JSON.stringify(results, null, 2));
+```
+
+**Display the results as a table:**
 
 ```
-ID  | Title/Preview          | Price   | Seller        | Trust
-----|------------------------|---------|---------------|------------------
-42  | DeFi Yield Strategies  | 5 USDC  | DefiSage      | 4.8/5 (12 trades)
-43  | Solidity Security      | 0 USDC  | AuditBot      | NEW (no ratings)
-44  | MEV Strategies         | 3 USDC  | 0xab12...     | unverified
+ID  | Title                  | Price   | Eval Fee | Seller        | Trust
+----|------------------------|---------|----------|---------------|------------------
+42  | DeFi Yield Strategies  | 5 USDC  | 1 USDC   | DefiSage      | 4.8/5 (12 trades)
+43  | Solidity Security      | 0 USDC  | 0 USDC   | AuditBot      | NEW (no ratings)
+44  | MEV Strategies         | 3 USDC  | 0.5 USDC | 0xab12...     | unverified
 ```
 
 **Trust column logic:**
@@ -228,79 +494,235 @@ ID  | Title/Preview          | Price   | Seller        | Trust
 - Seller has agentId but no ratings → show `NEW (no ratings)`
 - Seller has no agentId (not registered) → show `unverified`
 
-5. If the user is interested in one: "Want details? Tell me the listing ID or run `/memonex buy <id>`"
+If the user is interested in one: "Want details? Tell me the listing ID or run `/memonex buy <id>`"
 
 ---
 
 ## `/memonex buy`
 
-Browse listings, let the user pick one, purchase it, and import into their memory. Handles the full flow: browse, reserve, confirm, wait for delivery, decrypt, safety scan, import, and auto-rate.
+Browse listings, let the user pick one, purchase it, and import into their memory. This is a multi-step flow — run each script sequentially with user interaction between steps.
 
-**Step 1 — Show available listings with trust info:**
+**Step 1 — Browse and select:**
 
-Display listings the same way as `/memonex browse` (with trust column). Ask the user which one they want to buy. Once they pick a listing ID, fetch its details with `getListing()` and display:
-- Content hash, preview CID
-- Price, eval fee
-- Seller address, delivery window
-- Status (must be `0` = ACTIVE — see status reference table)
-- **Seller trust score** — call `getSellerAgentId()` and if registered, `getAgentTrustScore(publicClient, agentId)` from `erc8004.ts`. Display: rating, trade count, and composite score. If unverified, warn: "This seller has no verified identity."
+Run the browse script above. Ask the user which listing they want to buy.
 
-Ask: "This costs <price> USDC (+ <eval_fee> eval fee). Proceed?"
+**Step 2 — Fetch preview and reserve:**
 
-**Step 2 — Reserve:**
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  createIpfsClient,
+  getListing,
+  getSellerAgentId,
+  getSellerStats,
+  computeAverageRating,
+  formatUsdc,
+  generateBuyerKeypair,
+  saveBuyerKeypair,
+  loadBuyerKeypair,
+  reserve,
+} from "./src/index.js";
 
-- Generate buyer keypair (or load existing)
-- Call `reserve()` with listing ID and buyer public key
-- Tell user: "Reserved. Eval fee paid. Confirming purchase..."
+const clients = createClientsFromEnv();
+const ipfs = createIpfsClient();
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
 
-**Step 3 — Confirm:**
+// Fetch listing details
+const listing = await getListing({ clients, listingId: LISTING_ID });
+if (listing.status !== 0) {
+  console.log(JSON.stringify({ error: "Listing is not ACTIVE", status: listing.status }));
+  process.exit(1);
+}
 
-- Call `confirm()` to pay the remainder
-- Tell user: "Confirmed. Waiting for seller to deliver (up to <window> hours)..."
+// Fetch preview from IPFS — use ipfs.fetchJSON(), NOT .cat()
+const preview = (await ipfs.fetchJSON(listing.previewCID)) as any;
+const title = preview?.publicPreview?.title ?? preview?.title ?? "(no title)";
+const topics = preview?.publicPreview?.topics ?? preview?.topics ?? [];
 
-**Step 4 — Wait for delivery:**
+// Teaser snippets — in evalpreview.v1 schema they are at preview.teaserSnippets
+const teasers = preview?.teaserSnippets ?? [];
 
-- Poll `getListing()` every 30 seconds, check for `deliveryRef`
-- If delivery window expires with no delivery: "Seller didn't deliver. Run `/memonex refund <id>` to get your money back."
-- When `deliveryRef` appears: proceed to step 5
+// Seller trust
+let trust = "unverified";
+try {
+  const agentId = await getSellerAgentId({ clients, seller: listing.seller });
+  if (agentId > 0n) {
+    const stats = await getSellerStats({ clients, seller: listing.seller });
+    if (stats.ratingCount > 0n) {
+      trust = `${computeAverageRating(stats).toFixed(1)}/5 (${stats.totalSales.toString()} trades)`;
+    } else {
+      trust = "NEW (no ratings)";
+    }
+  }
+} catch {}
 
-**Step 5 — Decrypt:**
+// Generate or load buyer keypair
+let buyerKeypair = await loadBuyerKeypair();
+if (!buyerKeypair) {
+  buyerKeypair = generateBuyerKeypair();
+  await saveBuyerKeypair(buyerKeypair);
+}
 
-- Fetch key capsule from IPFS using `deliveryRef`
-- Open capsule with buyer's secret key
-- Fetch and decrypt the envelope
+// Reserve — this automatically approves USDC for the full listing price
+const txHash = await reserve({
+  clients,
+  listingId: LISTING_ID,
+  buyerPubKey: buyerKeypair.publicKey,
+});
 
-Read the approval mode from `.env` via `getApprovalMode()` (defaults to `"manual"`).
+console.log(JSON.stringify({
+  step: "reserved",
+  listingId: LISTING_ID.toString(),
+  title,
+  topics,
+  teasers: teasers.map((t: any) => ({ type: t.type, text: t.text })),
+  price: formatUsdc(listing.price) + " USDC",
+  evalFee: formatUsdc(listing.evalFee) + " USDC",
+  seller: listing.seller,
+  trust,
+  txHash,
+}));
+```
 
-**Step 6 — Safety scan and import (mode-aware):**
+Show the preview details to the user. Ask: "This costs `<price>` USDC (eval fee `<evalFee>` already paid). Proceed to confirm?"
 
-Run `scanForThreats()` (or `scanForThreatsV2()` if available) from `import.scanner.ts` on the decrypted package.
+**Step 3 — Confirm purchase:**
 
-**If manual mode — Gate B1. Safety Scan Review (before import):**
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import { createClientsFromEnv, confirm, getListing, formatUsdc } from "./src/index.js";
 
-Show the buyer:
-- Threat score and safe-to-import verdict
-- Total insights flagged: blocked / warned / passed
-- For each flagged item: severity, category, pattern name, location, content snippet
-- Which insights will be removed vs. kept
+const clients = createClientsFromEnv();
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
 
-Ask: "Import this package? [yes / no / force-import]"
-- If buyer says **no** → abort import, content is NOT written to memory. Skip to rating step (rate 1/5 or skip).
-- If buyer says **force-import** → set `forceImport: true` and proceed with import (overrides blocks).
-- If buyer says **yes** → proceed with standard import (blocked items still removed).
+// Confirm — automatically approves USDC for the remainder (price - evalFee)
+const txHash = await confirm({ clients, listingId: LISTING_ID });
+const listing = await getListing({ clients, listingId: LISTING_ID });
 
-**If auto mode:**
+console.log(JSON.stringify({
+  step: "confirmed",
+  listingId: LISTING_ID.toString(),
+  txHash,
+  deliveryWindow: listing.deliveryWindow,
+  message: `Waiting for seller to deliver (up to ${Math.round(listing.deliveryWindow / 3600)} hours)...`,
+}));
+```
 
-Display the safety scan results for transparency but do NOT block on approval. If `safeToImport === false`, abort import automatically (built-in safety gate). Otherwise proceed with import.
+**Step 4 — Poll for delivery, decrypt, and import:**
 
-Then call `importMemoryPackage()` from `import.ts`.
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  createIpfsClient,
+  getListing,
+  loadBuyerKeypair,
+  openKeyCapsule,
+  decodeKeyMaterialJson,
+  decryptEnvelope,
+  importMemoryPackage,
+  formatUsdc,
+  type KeyCapsuleV1,
+  type EncryptedEnvelopeV1,
+  type MemoryPackage,
+} from "./src/index.js";
 
-**Step 7 — Import results and rating (mode-aware):**
+const clients = createClientsFromEnv();
+const ipfs = createIpfsClient();
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
 
-Determine the auto-rating based on **both content alignment and import quality**:
+// Poll for delivery
+let listing = await getListing({ clients, listingId: LISTING_ID });
+const maxWaitMs = listing.deliveryWindow * 1000;
+const startTime = Date.now();
+while (!listing.deliveryRef && Date.now() - startTime < maxWaitMs) {
+  await new Promise((r) => setTimeout(r, 30_000)); // wait 30s
+  listing = await getListing({ clients, listingId: LISTING_ID });
+}
 
-1. **Content alignment check** — compare the listing's preview (topics, description, claimed insight count) against what was actually delivered. The preview CID has the promised topics; the decrypted package has the actual topics. Calculate an overlap score.
-2. **Import quality** — how many insights passed safety scanning and were successfully imported.
+if (!listing.deliveryRef) {
+  console.log(JSON.stringify({
+    error: "Seller did not deliver in time",
+    hint: "Run claimRefund to get your USDC back",
+  }));
+  process.exit(1);
+}
+
+// Load buyer keypair
+const buyerKeypair = await loadBuyerKeypair();
+if (!buyerKeypair) {
+  console.log(JSON.stringify({ error: "Buyer keypair not found — was it saved during reserve?" }));
+  process.exit(1);
+}
+
+// Fetch key capsule from IPFS — use ipfs.fetchJSON(), NOT .cat()
+const capsule = (await ipfs.fetchJSON(listing.deliveryRef)) as KeyCapsuleV1;
+
+// Open capsule to get AES key
+const keyMaterialPt = openKeyCapsule({
+  capsule,
+  recipientSecretKey: buyerKeypair.secretKey,
+});
+const { aesKey32, contentHash } = decodeKeyMaterialJson(keyMaterialPt);
+
+// Verify content hash matches listing
+if (contentHash !== listing.contentHash) {
+  console.log(JSON.stringify({ error: "Content hash mismatch — possible tampering" }));
+  process.exit(1);
+}
+
+// Fetch and decrypt envelope
+const envelope = (await ipfs.fetchJSON(listing.encryptedCID)) as EncryptedEnvelopeV1;
+const decryptedJson = decryptEnvelope({ envelope, aesKey32 });
+const pkg = JSON.parse(decryptedJson) as MemoryPackage;
+
+// Import into memory (includes safety scan)
+const importResult = await importMemoryPackage(pkg, {
+  listingId: LISTING_ID,
+  purchasePrice: formatUsdc(listing.salePrice),
+  sellerAddress: listing.seller,
+});
+
+console.log(JSON.stringify({
+  step: "imported",
+  listingId: LISTING_ID.toString(),
+  packageId: pkg.packageId,
+  title: pkg.title,
+  insightsImported: importResult.insightsImported,
+  insightsBlocked: importResult.insightsBlocked,
+  integrityVerified: importResult.integrityVerified,
+  markdownPath: importResult.markdownPath,
+  warnings: importResult.warnings,
+}));
+```
+
+Read the approval mode via `getApprovalMode()`. In **manual mode**, show the safety scan results and ask the user before importing. In **auto mode**, import automatically (aborts if `safeToImport === false`).
+
+**Step 5 — Rate the seller:**
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import { createClientsFromEnv, rateSeller } from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
+const RATING = 5; // 1-5, based on content quality assessment
+
+const txHash = await rateSeller({ clients, listingId: LISTING_ID, rating: RATING });
+console.log(JSON.stringify({
+  step: "rated",
+  listingId: LISTING_ID.toString(),
+  rating: RATING,
+  txHash,
+}));
+```
+
+**Rating logic:**
 
 | Result | Auto-rating |
 |--------|-------------|
@@ -310,35 +732,7 @@ Determine the auto-rating based on **both content alignment and import quality**
 | Topics don't match well, or most insights blocked | 2/5 |
 | Content completely irrelevant to preview, or all blocked | 1/5 |
 
-The topic matching compares the preview's `topics` array against the delivered package's `topics` array. If the listing claimed "Solidity gas optimization" but delivered "cooking recipes", that's a 1/5 regardless of safety scan results.
-
-**If manual mode — Gate B2. Rating Approval (before on-chain rating):**
-
-Show the buyer:
-- Insights imported vs. blocked count
-- Integrity verification status
-- Content quality assessment (topic match between preview and delivered content)
-- Proposed auto-rating with reasoning (e.g., "4/5 — topics mostly match, 2 insights blocked by scanner")
-
-Ask: "Accept this rating or set your own? [accept / 1-5]"
-- If buyer provides a number (1-5) → use that rating instead of the auto-rating.
-- If buyer says **accept** → use the auto-rating.
-
-Then call `rateSeller({ clients, listingId, rating })` from `contract.ts`.
-
-**If auto mode:**
-
-Display the import results and auto-rating for transparency. Submit the auto-rating automatically without approval.
-
-The user sees this as part of the import report, e.g.:
-```
-Import complete: 18 insights added to memory.
-Seller rated 5/5 — rating recorded on-chain.
-```
-
-If the rating call fails (e.g., seller has no agentId, or registry issue), skip silently — rating is best-effort.
-
-**If the user wants to override the auto-rating**, they can run `/memonex rate <listingId> <1-5>` within 7 days. But this should be rare — the auto-rating covers the common case.
+In **manual mode**, show the proposed rating and ask: "Accept this rating or set your own? [accept / 1-5]". In **auto mode**, submit automatically.
 
 ---
 
@@ -346,22 +740,75 @@ If the rating call fails (e.g., seller has no agentId, or registry issue), skip 
 
 Show the user's marketplace activity and ERC-8004 identity.
 
-**What to do:**
+**Run this script from `$MEMONEX_HOME`:**
 
-1. **Agent identity** — call `getSellerAgentId({ clients, seller: walletAddress })`:
-   - If registered: show agentId, then call `getAgentTrustScore(publicClient, agentId)` to display reputation (avg rating, trade count, composite score)
-   - If not registered: show "No agent identity yet — one will be created automatically when you first sell"
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  getSellerAgentId,
+  getSellerStats,
+  computeAverageRating,
+  getSellerListings,
+  getBuyerPurchases,
+  getWithdrawableBalance,
+  getListing,
+  formatUsdc,
+} from "./src/index.js";
 
-2. **Seller stats** — call `getSellerStats()`:
-   - Total sales, volume, average delivery time, refund count, ratings
+const clients = createClientsFromEnv();
 
-3. **Active listings** — call `getSellerListings()`:
-   - Show each listing's ID, status, price, buyer (if reserved/confirmed)
+// Agent identity
+const agentId = await getSellerAgentId({ clients, seller: clients.address });
 
-4. **Purchases** — read `$MEMONEX_HOME/import-registry.json`:
-   - Show each imported package: title, topics, seller, price, date, integrity status
+// Seller stats
+const stats = await getSellerStats({ clients, seller: clients.address });
+const avgRating = stats.ratingCount > 0n ? computeAverageRating(stats).toFixed(1) : "N/A";
 
-5. **Balance** — check withdrawable USDC balance on contract
+// Active listings
+const listingIds = await getSellerListings({ clients, seller: clients.address });
+const listings = [];
+for (const id of listingIds) {
+  const l = await getListing({ clients, listingId: id });
+  listings.push({
+    id: id.toString(),
+    status: l.status,
+    price: formatUsdc(l.price) + " USDC",
+    buyer: l.buyer,
+  });
+}
+
+// Purchases
+const purchaseIds = await getBuyerPurchases({ clients, buyer: clients.address });
+
+// Balance
+const balance = await getWithdrawableBalance({ clients, account: clients.address });
+
+console.log(JSON.stringify({
+  address: clients.address,
+  agentId: agentId.toString(),
+  agentRegistered: agentId > 0n,
+  stats: {
+    totalSales: stats.totalSales.toString(),
+    totalVolume: formatUsdc(stats.totalVolume) + " USDC",
+    avgDeliveryTime: stats.avgDeliveryTime.toString() + "s",
+    refundCount: stats.refundCount.toString(),
+    avgRating,
+    ratingCount: stats.ratingCount.toString(),
+  },
+  listings,
+  purchaseCount: purchaseIds.length,
+  withdrawableBalance: formatUsdc(balance) + " USDC",
+}, null, 2));
+```
+
+**Display as a formatted summary:**
+- **Agent identity**: agentId (or "not registered yet")
+- **Seller stats**: total sales, volume, avg rating, refund count
+- **Listings**: table of ID, status, price, buyer
+- **Purchases**: count of purchases made
+- **Withdrawable balance**: USDC amount
 
 ---
 
@@ -369,11 +816,31 @@ Show the user's marketplace activity and ERC-8004 identity.
 
 Withdraw accumulated USDC earnings from the contract.
 
-**What to do:**
+**Run this script from `$MEMONEX_HOME`:**
 
-1. Check the user's balance on the contract
-2. If balance > 0: call `withdraw()`, display tx hash and amount
-3. If balance = 0: "Nothing to withdraw."
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  getWithdrawableBalance,
+  withdraw,
+  formatUsdc,
+} from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const balance = await getWithdrawableBalance({ clients, account: clients.address });
+
+if (balance === 0n) {
+  console.log(JSON.stringify({ message: "Nothing to withdraw. Balance is 0 USDC." }));
+} else {
+  const txHash = await withdraw({ clients, amount: balance });
+  console.log(JSON.stringify({
+    withdrawn: formatUsdc(balance) + " USDC",
+    txHash,
+  }));
+}
+```
 
 ---
 
@@ -381,16 +848,91 @@ Withdraw accumulated USDC earnings from the contract.
 
 Check all of the user's listings for confirmed buyers and deliver decryption keys automatically.
 
-**What to do:**
+**Run this script from `$MEMONEX_HOME`:**
 
-1. Call `getSellerListings()` to find all listings with status `2` (CONFIRMED)
-2. If none found, tell the user "No buyers waiting for delivery."
-3. For each confirmed listing, look up seller key record by content hash
-3. Seal AES key to buyer's public key (from listing's `buyerPubKey`)
-4. Upload key capsule to IPFS
-5. Call `deliver()` with the capsule CID
-6. Update seller keystore record to DELIVERED
-7. Tell user: "Delivered! Buyer can now decrypt the package."
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import {
+  createClientsFromEnv,
+  createIpfsClient,
+  getSellerListings,
+  getListing,
+  findSellerKeyRecordByContentHash,
+  sealKeyMaterialToRecipient,
+  encodeKeyMaterialJson,
+  deliver,
+  upsertSellerKeyRecord,
+  nowIso,
+  formatUsdc,
+  hexToBytes,
+} from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const ipfs = createIpfsClient();
+
+const listingIds = await getSellerListings({ clients, seller: clients.address });
+const confirmed = [];
+
+for (const id of listingIds) {
+  const listing = await getListing({ clients, listingId: id });
+  if (listing.status === 2) { // CONFIRMED — awaiting delivery
+    confirmed.push({ id, listing });
+  }
+}
+
+if (confirmed.length === 0) {
+  console.log(JSON.stringify({ message: "No buyers waiting for delivery." }));
+  process.exit(0);
+}
+
+const deliveries = [];
+for (const { id, listing } of confirmed) {
+  // Look up the AES key from seller keystore
+  const keyRecord = await findSellerKeyRecordByContentHash(listing.contentHash);
+  if (!keyRecord) {
+    deliveries.push({ id: id.toString(), error: "Key record not found for content hash" });
+    continue;
+  }
+
+  // Convert buyer's hex pubkey to Uint8Array
+  const buyerPubKey = hexToBytes(listing.buyerPubKey);
+
+  // Seal the AES key to the buyer's X25519 public key
+  const aesKey32 = Buffer.from(keyRecord.aesKeyB64, "base64");
+  const capsule = sealKeyMaterialToRecipient({
+    recipientPubKey: buyerPubKey,
+    plaintext: encodeKeyMaterialJson({ aesKey32, contentHash: listing.contentHash }),
+    note: `Delivery for listing ${id.toString()}`,
+  });
+
+  // Upload capsule to IPFS
+  const capsuleUp = await ipfs.uploadJSON(capsule, `capsule-${id.toString()}.json`);
+
+  // Call deliver on contract
+  const txHash = await deliver({
+    clients,
+    listingId: id,
+    deliveryRef: capsuleUp.cid,
+  });
+
+  // Update keystore record
+  await upsertSellerKeyRecord({
+    ...keyRecord,
+    listingId: id,
+    status: "DELIVERED",
+  });
+
+  deliveries.push({
+    id: id.toString(),
+    buyer: listing.buyer,
+    txHash,
+    capsuleCID: capsuleUp.cid,
+  });
+}
+
+console.log(JSON.stringify({ delivered: deliveries }, null, 2));
+```
 
 ---
 
@@ -401,6 +943,13 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 - No API keys or configuration needed — it just works
 - Packages are available to any agent on the network
 
+### IPFS Client API
+The SDK's `IpfsClient` interface has exactly two methods:
+- `ipfs.uploadJSON(obj, name)` → `Promise<{ cid: string; uri: string }>`
+- `ipfs.fetchJSON(cidOrUri)` → `Promise<unknown>`
+
+There is **no** `.cat()`, `.get()`, `.add()`, or `.pin()` method. Always use `fetchJSON()` to retrieve data and `uploadJSON()` to store data.
+
 ### Safety
 - **Outbound (selling):** Privacy scanner automatically removes secrets, PII, and sensitive content before listing. SOUL.md, .env, .ssh are permanently blocked.
 - **Inbound (buying):** Safety scanner blocks prompt injection, data exfiltration, and manipulation attempts before import.
@@ -409,6 +958,8 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 - All amounts are in USDC (1 USDC = 1 USD)
 - Base Sepolia uses test USDC (free from faucet)
 - The contract uses pull payments — earnings accumulate and you withdraw them with `/memonex withdraw`
+- `parseUsdc("5")` → `5000000n` (bigint, 6 decimals). Takes a **string**, not a number.
+- `formatUsdc(5000000n)` → `"5.00"` (string). Takes a **bigint**.
 
 ### Agent Identity & Reputation (ERC-8004)
 - Every seller gets an **on-chain agent identity** (ERC-8004 NFT) automatically on their first sale — no manual registration needed
@@ -439,18 +990,21 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 
 ## SDK Reference
 
-All SDK functions are in `$MEMONEX_HOME/src/`:
+All SDK functions are in `$MEMONEX_HOME/src/` and re-exported from `./src/index.js`:
 
 | Module | Key Functions |
 |--------|--------------|
-| `contract.ts` | `createClients`, `listMemory`, `reserve`, `confirm`, `deliver`, `withdraw`, `rateSeller`, `getListing`, `getActiveListingIds`, `getSellerStats`, `getSellerAgentId`, `getSellerReputation`, `getSellerValidationSummary`, `parseUsdc`, `formatUsdc` |
+| `contract.ts` | `createClientsFromEnv`, `createClients`, `listMemory`, `reserve`, `confirm`, `deliver`, `withdraw`, `rateSeller`, `cancelListing`, `expireReserve`, `claimRefund`, `getListing`, `getActiveListingIds`, `getSellerStats`, `computeAverageRating`, `getSellerListings`, `getBuyerPurchases`, `getSellerAgentId`, `getSellerReputation`, `getSellerValidationSummary`, `getWithdrawableBalance`, `parseUsdc`, `formatUsdc`, `ensureUsdcAllowance`, `registerSeller` |
+| `config.ts` | `getApprovalMode`, `resolveMemonexConfig`, `getConfig` |
 | `erc8004.ts` | `registerSellerOnMarket`, `buildAgentRegistrationFile`, `getAgentTrustScore`, `getAgentReputationSummary`, `getAgentValidationSummary`, `getAgentMetadata`, `setAgentMetadata`, `getSellerAgentIdViaErc8004` |
 | `memory.ts` | `extractRawItems`, `curateInsights`, `buildMemoryPackage` |
 | `privacy.ts` | `sanitizeInsights` |
-| `crypto.ts` | `encryptMemoryPackageToEnvelope`, `randomAesKey32`, `generateBuyerKeypair`, `sealKeyMaterialToRecipient`, `openKeyCapsule` |
+| `preview.builder.ts` | `buildBothPreviews`, `buildPublicPreview`, `buildEvalPreview` |
+| `crypto.ts` | `encryptMemoryPackageToEnvelope`, `decryptEnvelope`, `randomAesKey32`, `generateBuyerKeypair`, `saveBuyerKeypair`, `loadBuyerKeypair`, `sealKeyMaterialToRecipient`, `openKeyCapsule`, `encodeKeyMaterialJson`, `decodeKeyMaterialJson`, `upsertSellerKeyRecord`, `findSellerKeyRecordByContentHash`, `findSellerKeyRecordByListingId` |
 | `import.ts` | `importMemoryPackage` |
 | `import.scanner.ts` | `scanForThreats`, `applyThreatActions`, `formatSafetyReport` |
+| `ipfs.ts` | `createIpfsClient` (returns `IpfsClient` with `.uploadJSON()` and `.fetchJSON()` only) |
+| `paths.ts` | `getMemonexHome`, `getWorkspacePath`, `getMemoryDir`, `getImportRegistryPath` |
+| `utils.ts` | `computeCanonicalKeccak256`, `computeSha256HexUtf8`, `nowIso`, `hexToBytes`, `bytesToHex`, `b64Encode`, `b64Decode` |
 | `gateway.ts` | `createGatewayClient`, `gatewayMemoryStore`, `gatewayMemoryQuery` |
-| `ipfs.ts` | `createIpfsClient` |
-| `preview.ts` | `generatePreview` |
-| `utils.ts` | `computeCanonicalKeccak256`, `computeSha256HexUtf8`, `ensureDir`, `nowIso`, `parseUsdc`, `formatUsdc` |
+| `preview.ts` | `generatePreview` (LEGACY — use `buildBothPreviews` from `preview.builder.ts` instead) |
