@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 import {
   computeCanonicalKeccak256,
+  computeContentHash,
   ensureDir,
   nowIso,
   readJsonFile,
@@ -428,7 +429,7 @@ export async function importMemoryPackage(
   // ----- Step 1: Verify integrity -----
   let integrityVerified = false;
   if (!opts.skipIntegrityCheck && pkg.integrity.canonicalKeccak256) {
-    const recomputed = computeCanonicalKeccak256({ ...pkg, integrity: {} });
+    const recomputed = computeContentHash(pkg);
     if (recomputed === pkg.integrity.canonicalKeccak256) {
       integrityVerified = true;
     } else {

@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import canonicalize from "canonicalize";
 import { keccak256, toBytes, type Hex } from "viem";
+import type { MemoryPackage } from "./types.js";
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -13,6 +14,15 @@ export function computeCanonicalKeccak256(obj: unknown): Hex {
   const canon = (canonicalize as unknown as (input: unknown) => string | undefined)(obj);
   if (canon == null) throw new Error("canonicalize() returned null/undefined");
   return keccak256(toBytes(canon));
+}
+
+/**
+ * Compute the canonical content hash of a MemoryPackage.
+ * Always strips the `integrity` field before hashing so the hash is
+ * stable regardless of whether integrity has been populated.
+ */
+export function computeContentHash(pkg: MemoryPackage): Hex {
+  return computeCanonicalKeccak256({ ...pkg, integrity: {} });
 }
 
 export function computeSha256HexUtf8(text: string): string {

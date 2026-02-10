@@ -208,13 +208,14 @@ Write and run this TypeScript from `$MEMONEX_HOME`:
 ```typescript
 import dotenv from "dotenv";
 dotenv.config();
+import fs from "node:fs";
 import {
   createClientsFromEnv,
   extractRawItems,
   curateInsights,
   buildMemoryPackage,
   sanitizeInsights,
-  computeCanonicalKeccak256,
+  computeContentHash,
   computeSha256HexUtf8,
   formatUsdc,
   parseUsdc,
@@ -245,6 +246,18 @@ const rawItems = await extractRawItems(spec);
 const insights = curateInsights(rawItems, spec);
 const { sanitized, report } = sanitizeInsights(insights);
 
+// GUARD: abort if no insights survived extraction + privacy scan
+if (sanitized.length === 0) {
+  console.log(JSON.stringify({
+    error: "No insights survived extraction and privacy scan — nothing to sell",
+    hint: "Try broadening your query or time range",
+    rawItemsFound: rawItems.length,
+    insightsCurated: insights.length,
+    insightsAfterSanitize: 0,
+  }));
+  process.exit(1);
+}
+
 const pkgBase = buildMemoryPackage({
   spec,
   sellerAddress: clients.address,
@@ -253,17 +266,20 @@ const pkgBase = buildMemoryPackage({
   insights: sanitized,
   redactionSummary: report.summary,
 });
-const contentHash = computeCanonicalKeccak256({ ...pkgBase, integrity: {} });
-const pkg = {
+
+// computeContentHash always strips integrity before hashing — safe and deterministic
+const contentHash = computeContentHash(pkgBase);
+
+// Save package base to staging file — Step 5 will rebuild integrity fresh
+// This avoids plaintextSha256 inconsistencies between scripts
+fs.writeFileSync(".sell-staging.json", JSON.stringify({
   ...pkgBase,
-  integrity: { canonicalKeccak256: contentHash, plaintextSha256: "" },
-};
-const plaintextJson = JSON.stringify(pkg, null, 2);
-pkg.integrity.plaintextSha256 = computeSha256HexUtf8(plaintextJson);
+  integrity: { canonicalKeccak256: contentHash },
+}, null, 2), "utf8");
 
 console.log(JSON.stringify({
-  title: pkg.title,
-  topics: pkg.topics,
+  title: pkgBase.title,
+  topics: pkgBase.topics,
   insightCount: sanitized.length,
   privacyReport: {
     secretsRemoved: report.summary.secretsRemoved,
@@ -273,6 +289,7 @@ console.log(JSON.stringify({
   contentHash,
   priceUSDC: PRICE_USDC,
   evalFeeUSDC: EVAL_FEE_USDC,
+  stagingFile: ".sell-staging.json",
 }));
 ```
 
@@ -319,11 +336,12 @@ Display the same privacy scan report, preview, and listing summary for transpare
 
 **Step 5 — Encrypt, upload, and list:**
 
-Write and run this TypeScript from `$MEMONEX_HOME` (substitute values from Step 3 output):
+Write and run this TypeScript from `$MEMONEX_HOME`:
 
 ```typescript
 import dotenv from "dotenv";
 dotenv.config();
+import fs from "node:fs";
 import {
   createClientsFromEnv,
   createIpfsClient,
@@ -332,6 +350,8 @@ import {
   buildBothPreviews,
   listMemory,
   upsertSellerKeyRecord,
+  computeContentHash,
+  computeSha256HexUtf8,
   parseUsdc,
   formatUsdc,
   nowIso,
@@ -341,11 +361,28 @@ import {
 const clients = createClientsFromEnv();
 const ipfs = createIpfsClient();
 
-// These come from Step 3 — paste the actual values:
-const pkg: MemoryPackage = PASTE_PKG_JSON_HERE;
-const contentHash = "PASTE_CONTENT_HASH_HERE" as `0x${string}`;
+// Load the exact package saved by Step 3 — no manual pasting
+const pkg = JSON.parse(fs.readFileSync(".sell-staging.json", "utf8")) as MemoryPackage;
+
+// GUARD: verify insights are present — refuse to list an empty package
+if (!pkg.insights || pkg.insights.length === 0) {
+  console.log(JSON.stringify({
+    error: "Package has no insights — cannot list an empty package",
+    hint: "Re-run Step 3 with a broader query",
+  }));
+  process.exit(1);
+}
+
+// Recompute content hash (strips integrity — always deterministic)
+const contentHash = computeContentHash(pkg);
+
+// Rebuild integrity fresh so plaintextSha256 matches the exact encrypted bytes
+pkg.integrity = { canonicalKeccak256: contentHash, plaintextSha256: "" };
+const preHashJson = JSON.stringify(pkg, null, 2);
+pkg.integrity.plaintextSha256 = computeSha256HexUtf8(preHashJson);
 const plaintextJson = JSON.stringify(pkg, null, 2);
-const PRICE_USDC = "5";       // string!
+
+const PRICE_USDC = "5";       // string! — use the value from user input
 const EVAL_FEE_USDC = "1";    // string!
 const DELIVERY_WINDOW_SEC = 86400; // 24 hours
 
@@ -386,6 +423,9 @@ await upsertSellerKeyRecord({
   createdAt: nowIso(),
   status: "LISTED",
 });
+
+// Clean up staging file
+try { fs.unlinkSync(".sell-staging.json"); } catch {}
 
 console.log(JSON.stringify({
   listingId: listed.listingId.toString(),
@@ -685,11 +725,12 @@ console.log(JSON.stringify({
 }));
 ```
 
-**Step 5 — Poll for delivery, decrypt, and import:**
+**Step 5 — Receive delivery, decrypt, and safety scan:**
 
 ```typescript
 import dotenv from "dotenv";
 dotenv.config();
+import fs from "node:fs";
 import {
   createClientsFromEnv,
   createIpfsClient,
@@ -698,7 +739,8 @@ import {
   openKeyCapsule,
   decodeKeyMaterialJson,
   decryptEnvelope,
-  importMemoryPackage,
+  computeContentHash,
+  scanForThreatsV2,
   formatUsdc,
   type KeyCapsuleV1,
   type EncryptedEnvelopeV1,
@@ -754,12 +796,125 @@ const envelope = (await ipfs.fetchJSON(listing.encryptedCID)) as EncryptedEnvelo
 const decryptedJson = decryptEnvelope({ envelope, aesKey32 });
 const pkg = JSON.parse(decryptedJson) as MemoryPackage;
 
-// Import into memory (includes safety scan)
+// GUARD: check for empty package — seller may have packaged incorrectly
+if (!pkg.insights || pkg.insights.length === 0) {
+  console.log(JSON.stringify({
+    error: "Delivered package contains no insights — seller sent an empty package",
+    listingId: LISTING_ID.toString(),
+    hint: "Contact the seller or wait for delivery window to expire, then run claimRefund",
+  }));
+  process.exit(1);
+}
+
+// Verify integrity: recompute hash from decrypted content
+const recomputedHash = computeContentHash(pkg);
+const integrityOk = recomputedHash === listing.contentHash;
+
+// Run safety scan (DO NOT import yet — wait for approval)
+const scanResult = scanForThreatsV2(pkg);
+
+// Save package to staging file for Step 7 import
+fs.writeFileSync(".buy-staging.json", decryptedJson, "utf8");
+
+console.log(JSON.stringify({
+  step: "scanned",
+  listingId: LISTING_ID.toString(),
+  packageId: pkg.packageId,
+  title: pkg.title,
+  topics: pkg.topics,
+  insightCount: pkg.insights.length,
+  integrityVerified: integrityOk,
+  safetyReport: {
+    safeToImport: scanResult.safeToImport,
+    threatScore: scanResult.threatScore,
+    totalFlagged: scanResult.summary.total,
+    blocked: scanResult.summary.blocked,
+    warned: scanResult.summary.warned,
+    insightsRemoved: scanResult.summary.insightsRemoved,
+    flags: scanResult.flags.map(f => ({
+      severity: f.severity,
+      category: f.category,
+      message: f.message,
+      location: f.location,
+      action: f.action,
+    })),
+  },
+  seller: listing.seller,
+  purchasePrice: formatUsdc(listing.salePrice) + " USDC",
+  stagingFile: ".buy-staging.json",
+}));
+```
+
+**Step 6 — Import approval gate (APPROVAL GATE):**
+
+Read the approval mode via `getApprovalMode()`.
+
+**If manual mode — STOP and wait for user response:**
+
+Display the safety scan results to the user:
+- **Package title** and **topics**
+- **Integrity**: verified or mismatch warning
+- **Safety scan**: threat score, safe/unsafe verdict
+- **Flags** (if any): severity, category, message for each
+  ```
+  [CRITICAL] prompt-injection — Instruction override attempt @ insight:3.content
+  [WARN]     privacy — Email address @ insight:7.content
+  ```
+- **Summary**: total flagged, blocked, warned, insights that would be removed
+- **Insights**: total count, how many would survive after blocking
+
+Then ask:
+
+> Safety scan complete: **`<safeToImport ? "SAFE" : "UNSAFE">`** (threat score: `<threatScore>`).
+> `<blocked>` insight(s) will be blocked, `<warned>` warnings.
+>
+> Import this package into your memory? **[yes / no]**
+
+**STOP here and wait for the user's response.**
+
+- If **yes** → proceed to Step 7.
+- If **no** → tell the user the package will not be imported. The USDC has already been spent (trade is complete on-chain). **STOP.**
+
+**If auto mode — agent evaluates safety:**
+
+1. `scanResult.safeToImport === true` — package passed safety checks
+2. `scanResult.threatScore < 0.4` — low overall risk
+3. Integrity verified
+
+- **All pass** → proceed to Step 7.
+- **Any fail** → do NOT import. Report which checks failed. Tell the user the trade completed but the package was not imported due to safety concerns. **STOP.**
+
+**Step 7 — Import into memory:**
+
+Only run after Step 6 approval gate passes.
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import fs from "node:fs";
+import {
+  importMemoryPackage,
+  formatUsdc,
+  type MemoryPackage,
+} from "./src/index.js";
+
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
+const SALE_PRICE = "REPLACE_WITH_SALE_PRICE";     // from Step 5 output
+const SELLER_ADDRESS = "REPLACE_WITH_SELLER";       // from Step 5 output
+
+// Load package from staging file saved by Step 5
+const pkg = JSON.parse(fs.readFileSync(".buy-staging.json", "utf8")) as MemoryPackage;
+
+// Import with skipSafetyScan since we already scanned in Step 5
 const importResult = await importMemoryPackage(pkg, {
   listingId: LISTING_ID,
-  purchasePrice: formatUsdc(listing.salePrice),
-  sellerAddress: listing.seller,
+  purchasePrice: SALE_PRICE,
+  sellerAddress: SELLER_ADDRESS as `0x${string}`,
+  skipSafetyScan: true,
 });
+
+// Clean up staging file
+try { fs.unlinkSync(".buy-staging.json"); } catch {}
 
 console.log(JSON.stringify({
   step: "imported",
@@ -774,9 +929,7 @@ console.log(JSON.stringify({
 }));
 ```
 
-Read the approval mode via `getApprovalMode()`. In **manual mode**, show the safety scan results and ask the user before importing. In **auto mode**, import automatically (aborts if `safeToImport === false`).
-
-**Step 6 — Rate the seller:**
+**Step 8 — Rate the seller:**
 
 ```typescript
 import dotenv from "dotenv";
@@ -1079,6 +1232,6 @@ All SDK functions are in `$MEMONEX_HOME/src/` and re-exported from `./src/index.
 | `import.scanner.ts` | `scanForThreats`, `applyThreatActions`, `formatSafetyReport` |
 | `ipfs.ts` | `createIpfsClient` (returns `IpfsClient` with `.uploadJSON()` and `.fetchJSON()` only) |
 | `paths.ts` | `getMemonexHome`, `getWorkspacePath`, `getMemoryDir`, `getImportRegistryPath` |
-| `utils.ts` | `computeCanonicalKeccak256`, `computeSha256HexUtf8`, `nowIso`, `hexToBytes`, `bytesToHex`, `b64Encode`, `b64Decode` |
+| `utils.ts` | `computeCanonicalKeccak256`, `computeContentHash`, `computeSha256HexUtf8`, `nowIso`, `hexToBytes`, `bytesToHex`, `b64Encode`, `b64Decode` |
 | `gateway.ts` | `createGatewayClient`, `gatewayMemoryStore`, `gatewayMemoryQuery` |
 | `preview.ts` | `generatePreview` (LEGACY — use `buildBothPreviews` from `preview.builder.ts` instead) |
