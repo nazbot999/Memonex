@@ -63,7 +63,7 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     network: "base-sepolia",
     chain: baseSepolia,
     chainId: 84532,
-    rpcUrls: ["https://sepolia.base.org"],
+    rpcUrls: ["https://memonex-ipfs.memonex.workers.dev/rpc/base-sepolia", "https://sepolia.base.org"],
     explorerBaseUrl: "https://sepolia.basescan.org",
     addresses: {
       market: "0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C",
@@ -100,7 +100,7 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     network: "monad",
     chain: monad,
     chainId: 143,
-    rpcUrls: ["https://rpc.monad.xyz"],
+    rpcUrls: ["https://memonex-ipfs.memonex.workers.dev/rpc/monad", "https://rpc.monad.xyz"],
     explorerBaseUrl: "https://monadscan.com",
     addresses: {
       market: "0x0000000000000000000000000000000000000000",
