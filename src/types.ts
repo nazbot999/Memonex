@@ -198,6 +198,7 @@ export type EvalPreview = {
   teaserSnippets: Array<{
     snippetId: string;
     type: "decision" | "fact" | "playbook" | "heuristic" | "warning";
+    title?: string; // Insight title for context
     text: string; // Actual teaser content
     redactions: string[]; // What was redacted from this snippet
   }>;

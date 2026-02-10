@@ -506,7 +506,7 @@ Browse listings, let the user pick one, purchase it, and import into their memor
 
 Run the browse script above. Ask the user which listing they want to buy.
 
-**Step 2 — Fetch preview and reserve:**
+**Step 2 — Reserve and fetch eval preview:**
 
 ```typescript
 import dotenv from "dotenv";
@@ -544,6 +544,10 @@ const topics = preview?.publicPreview?.topics ?? preview?.topics ?? [];
 // Teaser snippets — in evalpreview.v1 schema they are at preview.teaserSnippets
 const teasers = preview?.teaserSnippets ?? [];
 
+// Quality metrics and content summary from eval preview
+const qualityMetrics = preview?.qualityMetrics ?? {};
+const contentSummary = preview?.contentSummary ?? {};
+
 // Seller trust
 let trust = "unverified";
 try {
@@ -572,23 +576,93 @@ const txHash = await reserve({
   buyerPubKey: buyerKeypair.publicKey,
 });
 
+// Compute remaining cost after eval fee
+const evalFeePaid = listing.evalFee;
+const remainingCost = listing.price - evalFeePaid;
+
 console.log(JSON.stringify({
   step: "reserved",
   listingId: LISTING_ID.toString(),
   title,
   topics,
-  teasers: teasers.map((t: any) => ({ type: t.type, text: t.text })),
+  teasers: teasers.map((t: any) => ({
+    type: t.type,
+    title: t.title ?? null,
+    text: t.text,
+  })),
+  qualityMetrics,
+  contentSummary,
   price: formatUsdc(listing.price) + " USDC",
-  evalFee: formatUsdc(listing.evalFee) + " USDC",
+  evalFee: formatUsdc(evalFeePaid) + " USDC",
+  remainingCost: formatUsdc(remainingCost) + " USDC",
   seller: listing.seller,
   trust,
   txHash,
 }));
 ```
 
-Show the preview details to the user. Ask: "This costs `<price>` USDC (eval fee `<evalFee>` already paid). Proceed to confirm?"
+**Step 3 — Evaluate and approve (APPROVAL GATE):**
 
-**Step 3 — Confirm purchase:**
+Read the approval mode via `getApprovalMode()`.
+
+**If manual mode — STOP and wait for user response:**
+
+Display a formatted eval preview to the user:
+- **Title** and **topics**
+- **Price breakdown**: eval fee paid (non-refundable) + remaining cost to confirm
+- **ALL teaser snippets** with their type badges and titles:
+  ```
+  [playbook] "Title Here" — snippet text...
+  [warning]  "Title Here" — snippet text...
+  ```
+- **Quality metrics**: novelty score, specificity score, token estimate
+- **Content summary**: total insights, playbooks, warnings, heuristics, etc.
+- **Seller trust**: trust score from Step 2
+
+Then ask:
+
+> You've paid **`<evalFee>`** eval fee (non-refundable). Confirm purchase for **`<remainingCost>`** more?
+>
+> **[yes / no]**
+
+**STOP here and wait for the user's response.**
+
+- If **yes** → proceed to Step 4.
+- If **no** → cancel the reservation:
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+import { createClientsFromEnv, cancel } from "./src/index.js";
+
+const clients = createClientsFromEnv();
+const LISTING_ID = BigInt("REPLACE_WITH_LISTING_ID");
+
+const txHash = await cancel({ clients, listingId: LISTING_ID });
+console.log(JSON.stringify({
+  step: "cancelled",
+  listingId: LISTING_ID.toString(),
+  txHash,
+  message: "Reservation cancelled. Eval fee is forfeited.",
+}));
+```
+
+Tell the user the eval fee is forfeited and **STOP** — do not proceed further.
+
+**If auto mode — agent evaluates quality:**
+
+Assess the eval preview against these thresholds:
+1. `qualityMetrics.noveltyScore >= 0.4` — content is not generic
+2. `qualityMetrics.specificityScore >= 0.3` — content has meaningful detail
+3. At least 1 teaser snippet has readable content (not all redacted)
+4. Topics in the preview overlap with the listing title (basic relevance check)
+
+- **All pass** → proceed to Step 4.
+- **Any fail** → cancel the reservation using the cancel script above, report which checks failed, and **STOP**.
+
+**Step 4 — Confirm purchase:**
+
+Only run after Step 3 approval gate passes.
 
 ```typescript
 import dotenv from "dotenv";
@@ -611,7 +685,7 @@ console.log(JSON.stringify({
 }));
 ```
 
-**Step 4 — Poll for delivery, decrypt, and import:**
+**Step 5 — Poll for delivery, decrypt, and import:**
 
 ```typescript
 import dotenv from "dotenv";
@@ -702,7 +776,7 @@ console.log(JSON.stringify({
 
 Read the approval mode via `getApprovalMode()`. In **manual mode**, show the safety scan results and ask the user before importing. In **auto mode**, import automatically (aborts if `safeToImport === false`).
 
-**Step 5 — Rate the seller:**
+**Step 6 — Rate the seller:**
 
 ```typescript
 import dotenv from "dotenv";

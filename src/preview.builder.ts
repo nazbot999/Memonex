@@ -20,18 +20,37 @@ function redactSnippet(text: string): { text: string; redactions: string[] } {
   const redactions: string[] = [];
   let out = text;
 
+  // Always redact hex addresses (wallets, tx hashes, etc.)
   if (/0x[a-fA-F0-9]{6,}/.test(out)) {
     out = out.replace(/0x[a-fA-F0-9]{6,}/g, "[REDACTED_ADDRESS]");
     redactions.push("addresses");
   }
 
-  if (/\d/.test(out)) {
-    out = out.replace(/\b\d+(?:\.\d+)?\b/g, "[REDACTED_NUMBER]");
-    redactions.push("numbers");
+  // Always redact IP addresses
+  if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(out)) {
+    out = out.replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "[REDACTED_IP]");
+    redactions.push("ip-addresses");
   }
 
+  // Redact financial amounts: $X, X USDC/USD/ETH/BTC/DAI/WETH
+  if (/\$\s*[\d,.]+|\b[\d,.]+\s*(?:USDC|USD|ETH|BTC|DAI|WETH)\b/i.test(out)) {
+    out = out.replace(/\$\s*[\d,.]+/g, "[REDACTED_AMOUNT]");
+    out = out.replace(/\b[\d,.]+\s*(?:USDC|USD|ETH|BTC|DAI|WETH)\b/gi, "[REDACTED_AMOUNT]");
+    redactions.push("financial-amounts");
+  }
+
+  // Redact large numbers (>= 10,000) — likely financial
+  out = out.replace(/\b(\d[\d,]*(?:\.\d+)?)\b/g, (match) => {
+    const num = parseFloat(match.replace(/,/g, ""));
+    if (num >= 10_000) {
+      if (!redactions.includes("large-numbers")) redactions.push("large-numbers");
+      return "[REDACTED_NUMBER]";
+    }
+    return match;
+  });
+
   out = out.replace(/\s+/g, " ").trim();
-  if (out.length > 260) out = `${out.slice(0, 260).trim()}…`;
+  if (out.length > 500) out = `${out.slice(0, 500).trim()}…`;
 
   return { text: out, redactions };
 }
@@ -79,6 +98,7 @@ function selectTeaserSnippets(insights: Insight[], maxSnippets: number): EvalPre
     return {
       snippetId: `t${idx + 1}`,
       type: insight.type,
+      title: insight.title,
       text,
       redactions: redactions.length ? redactions : ["generalization"],
     };
@@ -197,7 +217,7 @@ export function buildPublicPreview(pkg: MemoryPackage, listing: ListingInput): P
 /** Build the eval (paid) preview for a memory package. */
 export function buildEvalPreview(pkg: MemoryPackage, publicPreview: PublicPreview): EvalPreview {
   const insights = pkg.insights;
-  const teaserSnippets = selectTeaserSnippets(insights, 4);
+  const teaserSnippets = selectTeaserSnippets(insights, 6);
   const combinedText = JSON.stringify(pkg);
   const tokenEstimate = estimateTokensFromText(combinedText);
 
