@@ -20,7 +20,7 @@ import type { ListingTupleV2, SellerStatsV2 } from "./types.js";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 
-export const MEMONEX_MARKET = "0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9" as const satisfies Address;
+export const MEMONEX_MARKET = "0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C" as const satisfies Address;
 export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const satisfies Address;
 export const EAS_BASE_SEPOLIA = "0x4200000000000000000000000000000000000021" as const satisfies Address;
 

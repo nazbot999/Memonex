@@ -7,6 +7,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
 import {IEAS} from "./interfaces/IEAS.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
@@ -21,7 +22,7 @@ import {IValidationRegistry} from "./interfaces/IValidationRegistry.sol";
 ///      - Buyer confirms by paying remainder within reserveWindow (CONFIRMED)
 ///      - Seller delivers encrypted key ref within deliveryWindow (COMPLETED)
 ///      - Liveness: anyone can expire stale reserve or claim refund on non-delivery.
-contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
+contract MemonexMarket is ReentrancyGuard, Ownable, Pausable, IERC721Receiver {
     using SafeERC20 for IERC20;
 
     // ------------------------------------------------------------------
@@ -401,6 +402,11 @@ contract MemonexMarket is ReentrancyGuard, Ownable, Pausable {
     // ------------------------------------------------------------------
     // Seller functions
     // ------------------------------------------------------------------
+
+    /// @dev Accept ERC-721 tokens (required for ERC-8004 identity minting via _safeMint).
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
 
     /// @notice Register seller in ERC-8004 identity registry.
     function registerSeller(string calldata agentURI) external returns (uint256 agentId) {

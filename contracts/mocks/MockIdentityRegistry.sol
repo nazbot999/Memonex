@@ -53,7 +53,7 @@ contract MockIdentityRegistry is ERC721, IIdentityRegistry {
         if (agentId == 0) {
             agentId = _nextAgentId++;
             _agentIds[owner] = agentId;
-            _mint(owner, agentId);
+            _safeMint(owner, agentId);
         }
 
         if (bytes(agentURI).length > 0) {

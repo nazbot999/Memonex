@@ -45,10 +45,19 @@ First-time setup. Run this once before using any other command.
    MEMONEX_AGENT_NAME=<their_agent_name_or_default_OpenClaw>
    ```
 
-4. Run `cd ~/.openclaw/workspace/pipeline/hackathon/memonex && npm install` if `node_modules/` doesn't exist.
+4. Ask the user to choose their **workflow approval mode**:
 
-5. Confirm setup is complete. Tell them:
+   > **[1] Full control (recommended)** — You'll review privacy scan results, see the buyer preview, and approve before anything goes on-chain. Best for: first-time sellers, sensitive content.
+   >
+   > **[2] Full autonomy** — The agent handles everything automatically. You'll still see summaries but won't be asked to approve each step. Best for: experienced sellers, routine listings.
+
+   Write `MEMONEX_APPROVAL_MODE=manual` (for option 1) or `MEMONEX_APPROVAL_MODE=auto` (for option 2) to the `.env` file.
+
+5. Run `cd ~/.openclaw/workspace/pipeline/hackathon/memonex && npm install` if `node_modules/` doesn't exist.
+
+6. Confirm setup is complete. Tell them:
    - Their wallet address (derive from key)
+   - Their approval mode (manual or auto)
    - They need Base Sepolia test USDC to trade (faucet: https://faucet.circle.com/)
    - They can now use `/memonex sell` or `/memonex browse`
 
@@ -84,7 +93,7 @@ Before listing, silently check if the seller has an on-chain agent identity:
 
 This is a one-time cost. Once registered, the agentId is cached both on-chain and in `.env`.
 
-**Step 3 — Extract and build the package:**
+**Step 3 — Extract, curate, and privacy scan:**
 
 Run this TypeScript via `npx tsx` from the memonex project directory:
 
@@ -97,6 +106,7 @@ import { createClients, listMemory, parseUsdc } from "./src/contract.js";
 import { computeCanonicalKeccak256, computeSha256HexUtf8, nowIso } from "./src/utils.js";
 import { generatePreview } from "./src/preview.js";
 import { getSellerAgentId, registerSellerOnMarket, buildAgentRegistrationFile } from "./src/erc8004.js";
+import { getApprovalMode } from "./src/config.js";
 ```
 
 Use `ExtractionSpec` with:
@@ -104,14 +114,48 @@ Use `ExtractionSpec` with:
 - `topics`, `query`, `timeRange` from user input
 - `constraints: { maxItems: 25, noPII: true, noSecrets: true }`
 
-**Step 4 — Show the user what was found:**
+Extract raw items, curate insights, and run privacy scanning (`sanitizeInsights`). Build the memory package and generate the preview.
 
-Display:
-- Number of insights extracted
-- Topics covered
-- Privacy report summary (what was redacted/blocked)
+**Step 4 — Review (mode-aware):**
 
-Ask: "Does this look good? Ready to list?"
+Read the approval mode from `.env` via `getApprovalMode()` (defaults to `"manual"`).
+
+**If manual mode — three approval gates:**
+
+**Gate 4a. Detailed Privacy Scan Report:**
+
+Show the user:
+- Total items scanned / approved / blocked
+- For each blocked item: reason, content snippet, action taken (DROP vs REDACT)
+- For each redaction: what was redacted, rule that triggered it
+- Leakage risk score with contributing factors
+
+Ask: "Proceed with these privacy scan results? [yes / no]"
+If the user says no → stop here, do not list.
+
+**Gate 4b. Buyer Preview:**
+
+Show the user exactly what buyers paying the eval fee will see:
+- Title, description, topics
+- Teaser snippets (redacted)
+- Quality metrics: novelty, specificity, estimated token count, leakage risk score
+- Content summary: insight counts by type (fact, pattern, lesson, etc.)
+
+Ask: "This is what buyers will evaluate. Approve this preview? [yes / no]"
+If the user says no → stop here, do not list.
+
+**Gate 4c. Final Listing Confirmation:**
+
+Show listing summary with warnings:
+- Title, insight count, price, eval fee, leakage risk, content hash
+- Warnings: this is an irreversible on-chain action; the listing cannot be modified after creation (only delisted via `cancelListing`)
+
+Ask: "Type 'yes' to confirm listing on-chain."
+If the user doesn't confirm → stop here, do not list.
+
+**If auto mode:**
+
+Display the same privacy scan report, preview, and listing summary for transparency — but do NOT block on approval. Proceed automatically to Step 5.
 
 **Step 5 — Encrypt, upload, and list:**
 
@@ -193,25 +237,40 @@ Ask: "This costs <price> USDC (+ <eval_fee> eval fee). Proceed?"
 - If delivery window expires with no delivery: "Seller didn't deliver. Run `/memonex refund <id>` to get your money back."
 - When `deliveryRef` appears: proceed to step 5
 
-**Step 5 — Decrypt and import:**
+**Step 5 — Decrypt:**
 
 - Fetch key capsule from IPFS using `deliveryRef`
 - Open capsule with buyer's secret key
 - Fetch and decrypt the envelope
-- Call `importMemoryPackage()` from `import.ts`
 
-**Step 6 — Report results:**
+Read the approval mode from `.env` via `getApprovalMode()` (defaults to `"manual"`).
 
-Display:
-- Safety scan: threat score, flags, blocked insights
-- Import: insights imported, markdown path, LanceDB stored, integrity check
-- "Done! This knowledge is now part of your memory. Just ask me about <topics> anytime."
+**Step 6 — Safety scan and import (mode-aware):**
 
-**Step 7 — Auto-rate the seller (automatic, no user action):**
+Run `scanForThreats()` (or `scanForThreatsV2()` if available) from `import.scanner.ts` on the decrypted package.
 
-Immediately after a successful import, automatically rate the seller on-chain. The buyer should never have to remember to rate — the agent handles it as part of the buy flow.
+**If manual mode — Gate B1. Safety Scan Review (before import):**
 
-Determine the rating based on **both content alignment and import quality**:
+Show the buyer:
+- Threat score and safe-to-import verdict
+- Total insights flagged: blocked / warned / passed
+- For each flagged item: severity, category, pattern name, location, content snippet
+- Which insights will be removed vs. kept
+
+Ask: "Import this package? [yes / no / force-import]"
+- If buyer says **no** → abort import, content is NOT written to memory. Skip to rating step (rate 1/5 or skip).
+- If buyer says **force-import** → set `forceImport: true` and proceed with import (overrides blocks).
+- If buyer says **yes** → proceed with standard import (blocked items still removed).
+
+**If auto mode:**
+
+Display the safety scan results for transparency but do NOT block on approval. If `safeToImport === false`, abort import automatically (built-in safety gate). Otherwise proceed with import.
+
+Then call `importMemoryPackage()` from `import.ts`.
+
+**Step 7 — Import results and rating (mode-aware):**
+
+Determine the auto-rating based on **both content alignment and import quality**:
 
 1. **Content alignment check** — compare the listing's preview (topics, description, claimed insight count) against what was actually delivered. The preview CID has the promised topics; the decrypted package has the actual topics. Calculate an overlap score.
 2. **Import quality** — how many insights passed safety scanning and were successfully imported.
@@ -226,16 +285,31 @@ Determine the rating based on **both content alignment and import quality**:
 
 The topic matching compares the preview's `topics` array against the delivered package's `topics` array. If the listing claimed "Solidity gas optimization" but delivered "cooking recipes", that's a 1/5 regardless of safety scan results.
 
-Then:
-1. Call `rateSeller({ clients, listingId, rating })` from `contract.ts`
-2. Tell the user: "Rated seller <rating>/5 based on content quality." (one line, not a separate prompt)
-3. If the rating call fails (e.g., seller has no agentId, or registry issue), skip silently — rating is best-effort
+**If manual mode — Gate B2. Rating Approval (before on-chain rating):**
 
-The user sees this as one seamless line at the bottom of the import report, e.g.:
+Show the buyer:
+- Insights imported vs. blocked count
+- Integrity verification status
+- Content quality assessment (topic match between preview and delivered content)
+- Proposed auto-rating with reasoning (e.g., "4/5 — topics mostly match, 2 insights blocked by scanner")
+
+Ask: "Accept this rating or set your own? [accept / 1-5]"
+- If buyer provides a number (1-5) → use that rating instead of the auto-rating.
+- If buyer says **accept** → use the auto-rating.
+
+Then call `rateSeller({ clients, listingId, rating })` from `contract.ts`.
+
+**If auto mode:**
+
+Display the import results and auto-rating for transparency. Submit the auto-rating automatically without approval.
+
+The user sees this as part of the import report, e.g.:
 ```
 Import complete: 18 insights added to memory.
 Seller rated 5/5 — rating recorded on-chain.
 ```
+
+If the rating call fails (e.g., seller has no agentId, or registry issue), skip silently — rating is best-effort.
 
 **If the user wants to override the auto-rating**, they can run `/memonex rate <listingId> <1-5>` within 7 days. But this should be rare — the auto-rating covers the common case.
 
@@ -331,7 +405,7 @@ Check all of the user's listings for confirmed buyers and deliver decryption key
 |---------|-------------------|---------|
 | Network | `base-sepolia` | `base` |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Mainnet USDC |
-| Market | `0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9` | TBD |
+| Market | `0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C` | TBD |
 | Faucet | https://faucet.circle.com/ | N/A |
 
 ---

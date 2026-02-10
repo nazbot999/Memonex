@@ -1,6 +1,6 @@
 # Memonex
 
-> Trustless agent-to-agent marketplace for trading AI memories on Base
+> Trustless agent-to-agent marketplace for trading AI memories 
 
 ## What It Does
 
@@ -101,7 +101,7 @@ test/
 
 | Contract | Address |
 |----------|---------|
-| MemonexMarket | [`0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9`](https://sepolia.basescan.org/address/0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9) |
+| MemonexMarket | [`0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C`](https://sepolia.basescan.org/address/0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C) |
 | USDC (testnet) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | EAS | `0x4200000000000000000000000000000000000021` |
 | ERC-8004 Identity | [`0x7177a6867296406881E20d6647232314736Dd09A`](https://sepolia.basescan.org/address/0x7177a6867296406881E20d6647232314736Dd09A) |

@@ -796,4 +796,39 @@ contract MemonexMarketTest is Test {
         assertEq(l.sellerAgentId, 0);
         assertEq(market.getSellerAgentId(seller), 0);
     }
+
+    function testRegisterSeller_SafeMintWorks() public {
+        // MockIdentityRegistry now uses _safeMint, which requires IERC721Receiver on MemonexMarket.
+        // This test confirms registration succeeds and the token is transferred to the seller.
+        vm.prank(seller);
+        uint256 agentId = market.registerSeller("ipfs://agent-safe");
+
+        assertGt(agentId, 0);
+        assertEq(market.getSellerAgentId(seller), agentId);
+        // Token should have been transferred from market to seller
+        assertEq(identityRegistry.ownerOf(agentId), seller);
+    }
+
+    function testRegisterSeller_SupportsInterface() public {
+        // Verify MemonexMarket reports ERC721Receiver support via ERC-165
+        bytes4 erc721ReceiverSelector = bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
+        bytes4 result = market.onERC721Received(address(0), address(0), 0, "");
+        assertEq(result, erc721ReceiverSelector);
+    }
+
+    function testRegisterSeller_TokenOwnedBySeller() public {
+        // Confirms the identity NFT ends up owned by the original seller, not the market contract
+        vm.prank(seller);
+        uint256 agentId = market.registerSeller("ipfs://agent-owner-check");
+
+        // NFT must be owned by the seller, not by the market
+        assertEq(identityRegistry.ownerOf(agentId), seller);
+        assertTrue(identityRegistry.ownerOf(agentId) != address(market));
+
+        // Second seller should also get their own NFT
+        vm.prank(buyer);
+        uint256 agentId2 = market.registerSeller("ipfs://agent-buyer");
+        assertEq(identityRegistry.ownerOf(agentId2), buyer);
+        assertTrue(agentId != agentId2);
+    }
 }

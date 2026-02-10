@@ -42,6 +42,13 @@ export type MemonexChainConfig = {
   defaultIpfsGateways: string[];
 };
 
+export type MemonexApprovalMode = "manual" | "auto";
+
+export function getApprovalMode(): MemonexApprovalMode {
+  const env = process.env.MEMONEX_APPROVAL_MODE?.trim()?.toLowerCase();
+  return env === "auto" ? "auto" : "manual";
+}
+
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -59,7 +66,7 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     rpcUrls: ["https://sepolia.base.org"],
     explorerBaseUrl: "https://sepolia.basescan.org",
     addresses: {
-      market: "0xc774bD9d2C043a09f4eE4b76fE308E986aFf0aD9",
+      market: "0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C",
       usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
       eas: "0x4200000000000000000000000000000000000021",
       identityRegistry: "0x7177a6867296406881E20d6647232314736Dd09A",
