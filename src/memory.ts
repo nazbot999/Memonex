@@ -190,11 +190,44 @@ function normalizeForDedup(s: string): string {
     .trim();
 }
 
+const STOP_WORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+  "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
+  "has", "have", "had", "do", "does", "did", "will", "would", "could",
+  "should", "may", "might", "can", "this", "that", "it", "its", "my",
+  "your", "our", "not", "no", "all", "any", "some", "how", "what",
+  "when", "where", "which", "who", "why", "about", "into", "as",
+]);
+
+function buildKeywords(topics: string[] | undefined, query: string | undefined): string[] {
+  const parts: string[] = [];
+  if (topics) {
+    for (const t of topics) parts.push(...t.toLowerCase().split(/[\s\-_/]+/));
+  }
+  if (query) {
+    parts.push(...query.toLowerCase().split(/[\s\-_/]+/));
+  }
+  return [...new Set(parts.filter((w) => w.length > 1 && !STOP_WORDS.has(w)))];
+}
+
+function scoreRelevance(text: string, keywords: string[]): number {
+  if (keywords.length === 0) return 1; // no keywords = everything relevant
+  const lower = text.toLowerCase();
+  let hits = 0;
+  for (const kw of keywords) {
+    if (lower.includes(kw)) hits++;
+  }
+  return hits / keywords.length;
+}
+
 export function curateInsights(rawItems: RawItem[], spec: ExtractionSpec): Insight[] {
   const maxItems = spec.constraints?.maxItems ?? 25;
+  const keywords = buildKeywords(spec.topics, spec.query);
+  const hasTopicFilter = keywords.length > 0;
+  const MIN_RELEVANCE = 0.1; // at least one keyword must appear
 
   const seen = new Set<string>();
-  const insights: Insight[] = [];
+  const candidates: Array<{ insight: Insight; relevance: number }> = [];
 
   for (const item of rawItems) {
     // Split by blank lines to get smaller atoms.
@@ -204,30 +237,37 @@ export function curateInsights(rawItems: RawItem[], spec: ExtractionSpec): Insig
       .filter(Boolean);
 
     for (const chunk of chunks) {
-      if (insights.length >= maxItems) break;
       if (chunk.length < 40) continue;
 
       const norm = normalizeForDedup(chunk);
       if (seen.has(norm)) continue;
       seen.add(norm);
 
+      const relevance = scoreRelevance(chunk, keywords);
+      if (hasTopicFilter && relevance < MIN_RELEVANCE) continue;
+
       const firstLine = chunk.split("\n")[0] ?? chunk;
       const title = firstLine.split(/\s+/).slice(0, 10).join(" ");
 
-      insights.push({
-        id: crypto.randomUUID(),
-        type: spec.outputStyle === "playbook" || spec.outputStyle === "checklist" ? "playbook" : "fact",
-        title: title.length > 8 ? title : `Insight from ${item.kind}`,
-        content: chunk,
-        confidence: 0.65,
-        tags: spec.topics,
-        evidence: [{ sourceId: item.id, quote: firstLine.slice(0, 200) }],
-        createdAt: item.timestamp,
+      candidates.push({
+        relevance,
+        insight: {
+          id: crypto.randomUUID(),
+          type: spec.outputStyle === "playbook" || spec.outputStyle === "checklist" ? "playbook" : "fact",
+          title: title.length > 8 ? title : `Insight from ${item.kind}`,
+          content: chunk,
+          confidence: 0.65,
+          tags: spec.topics,
+          evidence: [{ sourceId: item.id, quote: firstLine.slice(0, 200) }],
+          createdAt: item.timestamp,
+        },
       });
     }
   }
 
-  return insights;
+  // Sort by relevance (highest first), then take top maxItems
+  candidates.sort((a, b) => b.relevance - a.relevance);
+  return candidates.slice(0, maxItems).map((c) => c.insight);
 }
 
 export function buildMemoryPackage(params: {

@@ -91,6 +91,18 @@ if [ -f "$SDK_DIR/skill/.clawhub/origin.json" ]; then
   cp "$SDK_DIR/skill/.clawhub/origin.json" "$SKILL_DIR/.clawhub/origin.json"
 fi
 
+# --- Persist OPENCLAW_ROOT to .env so SDK resolves paths correctly ---
+if [ -f "$SDK_DIR/.env" ]; then
+  if ! grep -q '^OPENCLAW_ROOT=' "$SDK_DIR/.env"; then
+    echo "" >> "$SDK_DIR/.env"
+    echo "OPENCLAW_ROOT=$OPENCLAW_ROOT" >> "$SDK_DIR/.env"
+    echo "Appended OPENCLAW_ROOT to existing .env"
+  fi
+else
+  echo "OPENCLAW_ROOT=$OPENCLAW_ROOT" > "$SDK_DIR/.env"
+  echo "Created .env with OPENCLAW_ROOT"
+fi
+
 echo ""
 echo "=== Memonex installed! ==="
 echo ""

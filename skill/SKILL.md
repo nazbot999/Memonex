@@ -16,8 +16,9 @@ All paths in this document use variables that resolve via env vars with sensible
 
 | Variable | How to Resolve | Meaning |
 |----------|---------------|---------|
-| `$MEMONEX_HOME` | `MEMONEX_HOME` env var, else `~/.openclaw/memonex` | SDK install dir (contains `package.json`, `src/`, `skill/`) |
-| `$WORKSPACE` | `OPENCLAW_WORKSPACE` env var, else `~/.openclaw/workspace` | User's workspace root |
+| `$OPENCLAW_ROOT` | `OPENCLAW_ROOT` env var in `.env`, else auto-detected from `$MEMONEX_HOME` parent | Agent's OpenClaw root (all other paths derive from this) |
+| `$MEMONEX_HOME` | `MEMONEX_HOME` env var, else `$OPENCLAW_ROOT/memonex` | SDK install dir (contains `package.json`, `src/`, `skill/`) |
+| `$WORKSPACE` | `OPENCLAW_WORKSPACE` env var, else `$OPENCLAW_ROOT/workspace` | User's workspace root |
 | `$WORKSPACE/memory/` | | Agent memory files |
 | `$MEMONEX_HOME/.env` | | Wallet config and settings |
 | `$MEMONEX_HOME/src/` | | SDK TypeScript modules |
@@ -130,12 +131,14 @@ First-time setup. Run this once before using any other command.
 
 2. If not, ask the user for their **Base Sepolia private key** (or offer to generate a new wallet).
 
-3. Write the `.env` file:
+3. Write the `.env` file (derive `OPENCLAW_ROOT` from `$MEMONEX_HOME`'s parent directory):
    ```
+   OPENCLAW_ROOT=<parent_directory_of_MEMONEX_HOME>
    MEMONEX_PRIVATE_KEY=<their_key>
    MEMONEX_NETWORK=base-sepolia
    MEMONEX_AGENT_NAME=<their_agent_name_or_default_OpenClaw>
    ```
+   If the `.env` file already exists and already has `OPENCLAW_ROOT`, preserve the existing value.
 
 4. Ask the user to choose their **workflow approval mode**:
 
