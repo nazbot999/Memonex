@@ -135,6 +135,40 @@ class MockIpfsClient implements IpfsClient {
 }
 
 // ---------------------------------------------------------------------------
+// Eval key relay helpers — store/fetch eval AES keys via the relay worker
+// ---------------------------------------------------------------------------
+
+/** Store an eval AES key on the relay for automatic buyer delivery after reserve(). */
+export async function storeEvalKey(params: {
+  listingId: string;
+  evalAesKeyB64: string;
+  contentHash: string;
+}): Promise<void> {
+  const relayUrl = getRelayUrl();
+  const res = await fetch(`${relayUrl}/eval-key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to store eval key: ${res.status} ${text}`);
+  }
+}
+
+/** Fetch a sealed eval key capsule from the relay (available after reserve()). */
+export async function fetchEvalCapsule(listingId: string): Promise<unknown | null> {
+  const relayUrl = getRelayUrl();
+  const res = await fetch(`${relayUrl}/eval-capsule/${listingId}`);
+  if (res.status === 404 || res.status === 403) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to fetch eval capsule: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
 // Factory — picks the best available client
 //
 // Priority: user's own Pinata key → relay proxy → local mock

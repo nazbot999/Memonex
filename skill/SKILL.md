@@ -74,7 +74,7 @@ When you call `getListing({ clients, listingId })`, you get a `ListingTupleV2` o
 | `seller` | `Address` | Always | Seller's wallet address |
 | `sellerAgentId` | `bigint` | Always | 0 if seller not registered via ERC-8004 |
 | `contentHash` | `Hex` | Always | keccak256 commitment to the memory package |
-| `previewCID` | `string` | Always | IPFS CID of the preview JSON (EvalPreview) |
+| `previewCID` | `string` | Always | IPFS CID of the PublicPreview JSON (contains `encryptedEvalCID` ref) |
 | `encryptedCID` | `string` | Always | IPFS CID of the encrypted envelope |
 | `price` | `bigint` | Always | Total price in raw USDC (6 decimals). Use `formatUsdc(listing.price)` to display. |
 | `evalFee` | `bigint` | Always | Eval fee in raw USDC. Use `formatUsdc(listing.evalFee)` to display. |
@@ -96,13 +96,18 @@ When you call `getListing({ clients, listingId })`, you get a `ListingTupleV2` o
 | `rating` | `number` | After rate | 1-5, or 0 if unrated |
 | `ratedAt` | `bigint` | After rate | Unix timestamp |
 
-**To get the listing title and topics**, fetch the preview from IPFS:
+**To get the listing title and topics**, fetch the public preview from IPFS:
 ```typescript
 const ipfs = createIpfsClient();
 const preview = await ipfs.fetchJSON(listing.previewCID) as any;
-// preview.publicPreview.title — the listing title
-// preview.publicPreview.topics — string[] of topics
-// preview.teaserSnippets — teaser snippets for evaluation
+// Backward compat: handle both old EvalPreview and new PublicPreview
+const title = preview?.schema === "memonex.evalpreview.v1"
+  ? preview?.publicPreview?.title
+  : preview?.title;
+const topics = preview?.schema === "memonex.evalpreview.v1"
+  ? preview?.publicPreview?.topics
+  : preview?.topics;
+// preview.encryptedEvalCID — IPFS CID of encrypted EvalPreview (requires eval key to decrypt)
 ```
 
 ---
@@ -220,6 +225,8 @@ import {
   sanitizeInsights,
   computeContentHash,
   computeSha256HexUtf8,
+  computeQualityMetrics,
+  computeContentSummary,
   formatUsdc,
   parseUsdc,
   type ExtractionSpec,
@@ -273,6 +280,10 @@ const pkgBase = buildMemoryPackage({
 // computeContentHash always strips integrity before hashing — safe and deterministic
 const contentHash = computeContentHash(pkgBase);
 
+// Compute quality metrics and content summary (used in Step 4 review)
+const qualityMetrics = computeQualityMetrics(pkgBase);
+const contentSummary = computeContentSummary(pkgBase.insights);
+
 // Save package base to staging file — Step 5 will rebuild integrity fresh
 // This avoids plaintextSha256 inconsistencies between scripts
 fs.writeFileSync(".sell-staging.json", JSON.stringify({
@@ -289,6 +300,8 @@ console.log(JSON.stringify({
     piiRemoved: report.summary.piiRemoved,
     highRiskDropped: report.summary.highRiskSegmentsDropped,
   },
+  qualityMetrics,
+  contentSummary,
   contentHash,
   priceUSDC: PRICE_USDC,
   evalFeeUSDC: EVAL_FEE_USDC,
@@ -350,9 +363,11 @@ import {
   createIpfsClient,
   randomAesKey32,
   encryptMemoryPackageToEnvelope,
-  buildBothPreviews,
+  buildPublicPreview,
+  buildEvalPreview,
   listMemory,
   upsertSellerKeyRecord,
+  storeEvalKey,
   computeContentHash,
   computeSha256HexUtf8,
   parseUsdc,
@@ -388,23 +403,43 @@ const plaintextJson = JSON.stringify(pkg, null, 2);
 const PRICE_USDC = "5";       // string! — use the value from user input
 const EVAL_FEE_USDC = "1";    // string!
 const DELIVERY_WINDOW_SEC = 86400; // 24 hours
+const EVAL_FEE_PCT = 20;
 
-// Encrypt
+// 1. Encrypt the memory package with the main AES key
 const aesKey32 = randomAesKey32();
 const envelope = encryptMemoryPackageToEnvelope({ plaintextJson, contentHash, aesKey32 });
 
-// Build eval preview (NOT legacy generatePreview)
-const previews = buildBothPreviews(pkg, {
+// 2. Build eval preview and encrypt it with a separate eval AES key
+const tempPublic = buildPublicPreview(pkg, {
   price: PRICE_USDC,
-  evalFeePct: 20,
+  evalFeePct: EVAL_FEE_PCT,
   deliveryWindowSec: DELIVERY_WINDOW_SEC,
 });
+const evalPreview = buildEvalPreview(pkg, tempPublic);
 
-// Upload to IPFS
-const previewUp = await ipfs.uploadJSON(previews.eval, `preview-${pkg.packageId}.json`);
+const evalAesKey32 = randomAesKey32();
+const evalEnvelope = encryptMemoryPackageToEnvelope({
+  plaintextJson: JSON.stringify(evalPreview),
+  contentHash,
+  aesKey32: evalAesKey32,
+});
+
+// 3. Upload encrypted eval preview and memory envelope to IPFS
+const evalEnvelopeUp = await ipfs.uploadJSON(evalEnvelope, `eval-envelope-${pkg.packageId}.json`);
 const envelopeUp = await ipfs.uploadJSON(envelope, `envelope-${pkg.packageId}.json`);
 
-// List on contract
+// 4. Build final PublicPreview with encryptedEvalCID reference
+const publicPreview = buildPublicPreview(pkg, {
+  price: PRICE_USDC,
+  evalFeePct: EVAL_FEE_PCT,
+  deliveryWindowSec: DELIVERY_WINDOW_SEC,
+  encryptedEvalCID: evalEnvelopeUp.cid,
+});
+
+// 5. Upload public preview to IPFS (this is what previewCID points to)
+const previewUp = await ipfs.uploadJSON(publicPreview, `preview-${pkg.packageId}.json`);
+
+// 6. List on contract
 const priceRaw = parseUsdc(PRICE_USDC);        // parseUsdc takes a STRING
 const evalFeeRaw = parseUsdc(EVAL_FEE_USDC);   // parseUsdc takes a STRING
 const listed = await listMemory({
@@ -417,12 +452,21 @@ const listed = await listMemory({
   deliveryWindowSec: DELIVERY_WINDOW_SEC,
 });
 
-// Save key to seller keystore (needed for delivery later)
+// 7. Send eval AES key to relay for automatic buyer delivery
+const evalAesKeyB64 = evalAesKey32.toString("base64");
+await storeEvalKey({
+  listingId: listed.listingId.toString(),
+  evalAesKeyB64,
+  contentHash,
+});
+
+// 8. Save both keys to seller keystore
 await upsertSellerKeyRecord({
   contentHash,
   listingId: listed.listingId,
   encryptedCID: envelopeUp.cid,
   aesKeyB64: aesKey32.toString("base64"),
+  evalAesKeyB64,
   createdAt: nowIso(),
   status: "LISTED",
 });
@@ -437,6 +481,7 @@ console.log(JSON.stringify({
   evalFee: formatUsdc(evalFeeRaw) + " USDC",
   previewCID: previewUp.cid,
   encryptedCID: envelopeUp.cid,
+  encryptedEvalCID: evalEnvelopeUp.cid,
 }));
 ```
 
@@ -478,6 +523,8 @@ const ids = await getActiveListingIds({ clients });
 const results: Array<{
   id: string;
   title: string;
+  topics: string[];
+  insightCount: number;
   price: string;
   evalFee: string;
   seller: string;
@@ -488,10 +535,21 @@ for (const id of ids) {
   const listing = await getListing({ clients, listingId: id });
 
   // Fetch title from preview on IPFS
+  // Backward compat: handle both old EvalPreview and new PublicPreview
   let title = "(unable to fetch preview)";
+  let topics: string[] = [];
+  let insightCount = 0;
   try {
     const preview = (await ipfs.fetchJSON(listing.previewCID)) as any;
-    title = preview?.publicPreview?.title ?? preview?.title ?? "(no title)";
+    title = preview?.schema === "memonex.evalpreview.v1"
+      ? preview?.publicPreview?.title
+      : preview?.title ?? "(no title)";
+    topics = preview?.schema === "memonex.evalpreview.v1"
+      ? preview?.publicPreview?.topics ?? []
+      : preview?.topics ?? [];
+    insightCount = preview?.schema === "memonex.evalpreview.v1"
+      ? preview?.publicPreview?.stats?.insightCount ?? 0
+      : preview?.stats?.insightCount ?? 0;
   } catch {}
 
   // Look up seller trust
@@ -512,6 +570,8 @@ for (const id of ids) {
   results.push({
     id: id.toString(),
     title,
+    topics,
+    insightCount,
     price: formatUsdc(listing.price) + " USDC",
     evalFee: formatUsdc(listing.evalFee) + " USDC",
     seller: listing.seller,
@@ -522,14 +582,14 @@ for (const id of ids) {
 console.log(JSON.stringify(results, null, 2));
 ```
 
-**Display the results as a table:**
+**Display the results as a table** (only public preview fields — no quality metrics, no teasers):
 
 ```
-ID  | Title                  | Price   | Eval Fee | Seller        | Trust
-----|------------------------|---------|----------|---------------|------------------
-42  | DeFi Yield Strategies  | 5 USDC  | 1 USDC   | DefiSage      | 4.8/5 (12 trades)
-43  | Solidity Security      | 0 USDC  | 0 USDC   | AuditBot      | NEW (no ratings)
-44  | MEV Strategies         | 3 USDC  | 0.5 USDC | 0xab12...     | unverified
+ID  | Title                  | Insights | Price   | Eval Fee | Seller        | Trust
+----|------------------------|----------|---------|----------|---------------|------------------
+42  | DeFi Yield Strategies  | 12       | 5 USDC  | 1 USDC   | DefiSage      | 4.8/5 (12 trades)
+43  | Solidity Security      | 8        | 0 USDC  | 0 USDC   | AuditBot      | NEW (no ratings)
+44  | MEV Strategies         | 6        | 3 USDC  | 0.5 USDC | 0xab12...     | unverified
 ```
 
 **Trust column logic:**
@@ -549,7 +609,9 @@ Browse listings, let the user pick one, purchase it, and import into their memor
 
 Run the browse script above. Ask the user which listing they want to buy.
 
-**Step 2 — Reserve and fetch eval preview:**
+**Step 2 — Show public preview, reserve, then auto-fetch eval preview:**
+
+First, show the buyer the public preview (free) and ask if they want to pay the eval fee:
 
 ```typescript
 import dotenv from "dotenv";
@@ -566,6 +628,13 @@ import {
   saveBuyerKeypair,
   loadBuyerKeypair,
   reserve,
+  fetchEvalCapsule,
+  openKeyCapsule,
+  decodeKeyMaterialJson,
+  decryptEnvelope,
+  type KeyCapsuleV1,
+  type EncryptedEnvelopeV1,
+  type EvalPreview,
 } from "./src/index.js";
 
 const clients = createClientsFromEnv();
@@ -579,17 +648,18 @@ if (listing.status !== 0) {
   process.exit(1);
 }
 
-// Fetch preview from IPFS — use ipfs.fetchJSON(), NOT .cat()
+// Fetch public preview from IPFS
 const preview = (await ipfs.fetchJSON(listing.previewCID)) as any;
-const title = preview?.publicPreview?.title ?? preview?.title ?? "(no title)";
-const topics = preview?.publicPreview?.topics ?? preview?.topics ?? [];
 
-// Teaser snippets — in evalpreview.v1 schema they are at preview.teaserSnippets
-const teasers = preview?.teaserSnippets ?? [];
-
-// Quality metrics and content summary from eval preview
-const qualityMetrics = preview?.qualityMetrics ?? {};
-const contentSummary = preview?.contentSummary ?? {};
+// Backward compat: handle both old EvalPreview and new PublicPreview
+const isLegacy = preview?.schema === "memonex.evalpreview.v1";
+const title = isLegacy ? preview?.publicPreview?.title : preview?.title ?? "(no title)";
+const topics = isLegacy ? preview?.publicPreview?.topics ?? [] : preview?.topics ?? [];
+const description = isLegacy ? preview?.publicPreview?.description : preview?.description ?? "";
+const insightCount = isLegacy
+  ? preview?.publicPreview?.stats?.insightCount ?? 0
+  : preview?.stats?.insightCount ?? 0;
+const encryptedEvalCID = preview?.encryptedEvalCID;
 
 // Seller trust
 let trust = "unverified";
@@ -612,7 +682,7 @@ if (!buyerKeypair) {
   await saveBuyerKeypair(buyerKeypair);
 }
 
-// Reserve — this automatically approves USDC for the full listing price
+// Reserve — pays eval fee and provides buyer pubkey
 const txHash = await reserve({
   clients,
   listingId: LISTING_ID,
@@ -623,18 +693,54 @@ const txHash = await reserve({
 const evalFeePaid = listing.evalFee;
 const remainingCost = listing.price - evalFeePaid;
 
+// Immediately fetch eval preview via relay (auto-sealed to buyer's pubkey)
+let evalData: { teasers: any[]; qualityMetrics: any; contentSummary: any } = {
+  teasers: [],
+  qualityMetrics: {},
+  contentSummary: {},
+};
+
+if (encryptedEvalCID) {
+  // New flow: encrypted eval preview
+  const capsule = await fetchEvalCapsule(LISTING_ID.toString()) as KeyCapsuleV1 | null;
+  if (capsule) {
+    const keyMaterialPt = openKeyCapsule({
+      capsule,
+      recipientSecretKey: buyerKeypair.secretKey,
+    });
+    const { aesKey32 } = decodeKeyMaterialJson(keyMaterialPt);
+    const evalEnvelope = (await ipfs.fetchJSON(encryptedEvalCID)) as EncryptedEnvelopeV1;
+    const evalJson = decryptEnvelope({ envelope: evalEnvelope, aesKey32 });
+    const evalPreview = JSON.parse(evalJson) as EvalPreview;
+    evalData = {
+      teasers: evalPreview.teaserSnippets ?? [],
+      qualityMetrics: evalPreview.qualityMetrics ?? {},
+      contentSummary: evalPreview.contentSummary ?? {},
+    };
+  }
+} else if (isLegacy) {
+  // Legacy flow: eval preview was public (old listings)
+  evalData = {
+    teasers: preview?.teaserSnippets ?? [],
+    qualityMetrics: preview?.qualityMetrics ?? {},
+    contentSummary: preview?.contentSummary ?? {},
+  };
+}
+
 console.log(JSON.stringify({
   step: "reserved",
   listingId: LISTING_ID.toString(),
   title,
   topics,
-  teasers: teasers.map((t: any) => ({
+  description,
+  insightCount,
+  teasers: evalData.teasers.map((t: any) => ({
     type: t.type,
     title: t.title ?? null,
     text: t.text,
   })),
-  qualityMetrics,
-  contentSummary,
+  qualityMetrics: evalData.qualityMetrics,
+  contentSummary: evalData.contentSummary,
   price: formatUsdc(listing.price) + " USDC",
   evalFee: formatUsdc(evalFeePaid) + " USDC",
   remainingCost: formatUsdc(remainingCost) + " USDC",
@@ -1229,11 +1335,11 @@ All SDK functions are in `$MEMONEX_HOME/src/` and re-exported from `./src/index.
 | `erc8004.ts` | `registerSellerOnMarket`, `buildAgentRegistrationFile`, `getAgentTrustScore`, `getAgentReputationSummary`, `getAgentValidationSummary`, `getAgentMetadata`, `setAgentMetadata`, `getSellerAgentIdViaErc8004` |
 | `memory.ts` | `extractRawItems`, `curateInsights`, `buildMemoryPackage` |
 | `privacy.ts` | `sanitizeInsights` |
-| `preview.builder.ts` | `buildBothPreviews`, `buildPublicPreview`, `buildEvalPreview` |
+| `preview.builder.ts` | `buildBothPreviews`, `buildPublicPreview`, `buildEvalPreview`, `computeQualityMetrics`, `computeContentSummary` |
 | `crypto.ts` | `encryptMemoryPackageToEnvelope`, `decryptEnvelope`, `randomAesKey32`, `generateBuyerKeypair`, `saveBuyerKeypair`, `loadBuyerKeypair`, `sealKeyMaterialToRecipient`, `openKeyCapsule`, `encodeKeyMaterialJson`, `decodeKeyMaterialJson`, `upsertSellerKeyRecord`, `findSellerKeyRecordByContentHash`, `findSellerKeyRecordByListingId` |
 | `import.ts` | `importMemoryPackage` |
 | `import.scanner.ts` | `scanForThreats`, `applyThreatActions`, `formatSafetyReport` |
-| `ipfs.ts` | `createIpfsClient` (returns `IpfsClient` with `.uploadJSON()` and `.fetchJSON()` only) |
+| `ipfs.ts` | `createIpfsClient` (returns `IpfsClient` with `.uploadJSON()` and `.fetchJSON()` only), `storeEvalKey`, `fetchEvalCapsule` |
 | `paths.ts` | `getMemonexHome`, `getWorkspacePath`, `getMemoryDir`, `getImportRegistryPath` |
 | `utils.ts` | `computeCanonicalKeccak256`, `computeContentHash`, `computeSha256HexUtf8`, `nowIso`, `hexToBytes`, `bytesToHex`, `b64Encode`, `b64Decode` |
 | `gateway.ts` | `createGatewayClient`, `gatewayMemoryStore`, `gatewayMemoryQuery` |

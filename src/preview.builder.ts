@@ -6,6 +6,8 @@ type ListingInput = {
   price: string;
   evalFeePct: number;
   deliveryWindowSec: number;
+  /** IPFS CID of the encrypted EvalPreview. Included in PublicPreview when set. */
+  encryptedEvalCID?: string;
 };
 
 const TEASER_TYPES: Insight["type"][] = [
@@ -105,7 +107,7 @@ function selectTeaserSnippets(insights: Insight[], maxSnippets: number): EvalPre
   });
 }
 
-function computeContentSummary(insights: Insight[]): EvalPreview["contentSummary"] {
+export function computeContentSummary(insights: Insight[]): EvalPreview["contentSummary"] {
   const checklists = insights.filter((i) => i.tags?.some((tag) => /checklist/i.test(tag))).length;
   const decisionTrees = insights.filter((i) => i.tags?.some((tag) => /decision[-\s]?tree/i.test(tag))).length;
 
@@ -186,11 +188,24 @@ function resolveAcquisitionContext(pkg: MemoryPackage): EvalPreview["acquisition
   return undefined;
 }
 
+/** Compute quality metrics for a memory package (novelty, specificity, leakage risk, token estimate). */
+export function computeQualityMetrics(pkg: MemoryPackage): EvalPreview["qualityMetrics"] {
+  const insights = pkg.insights;
+  const combinedText = JSON.stringify(pkg);
+  return {
+    noveltyScore: computeNoveltyScore(insights),
+    specificityScore: computeSpecificityScore(insights),
+    tokenEstimate: estimateTokensFromText(combinedText),
+    leakageRiskScore: computeLeakageRiskScore(pkg),
+    lastUpdated: pkg.updatedAt ?? nowIso(),
+  };
+}
+
 /** Build the public (free) preview for a memory package. */
 export function buildPublicPreview(pkg: MemoryPackage, listing: ListingInput): PublicPreview {
   const contentHash = pkg.integrity.canonicalKeccak256 ?? computeCanonicalKeccak256(pkg);
 
-  return {
+  const preview: PublicPreview = {
     schema: "memonex.publicpreview.v1",
     title: pkg.title,
     description: pkg.description ?? `Insights on ${pkg.topics.join(", ") || "key topics"}.`,
@@ -212,6 +227,12 @@ export function buildPublicPreview(pkg: MemoryPackage, listing: ListingInput): P
       contentHash,
     },
   };
+
+  if (listing.encryptedEvalCID) {
+    preview.encryptedEvalCID = listing.encryptedEvalCID;
+  }
+
+  return preview;
 }
 
 /** Build the eval (paid) preview for a memory package. */

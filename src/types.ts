@@ -187,6 +187,8 @@ export type PublicPreview = {
   integrity: {
     contentHash: Hex;
   };
+  /** IPFS CID of the encrypted EvalPreview (EncryptedEnvelopeV1). Only set for v2+ listings. */
+  encryptedEvalCID?: string;
 };
 
 /** Eval preview — unlocked after paying eval fee (Phase 1) */
@@ -322,6 +324,8 @@ export type SellerKeystoreRecordV1 = {
   listingId?: bigint;
   encryptedCID: string;
   aesKeyB64: Base64String;
+  /** AES key used to encrypt the eval preview (separate from the package key). */
+  evalAesKeyB64?: Base64String;
   createdAt: IsoDateTimeString;
   status: "LISTED" | "DELIVERED" | "EXPIRED";
 };
