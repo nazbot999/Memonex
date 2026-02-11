@@ -466,6 +466,7 @@ await storeEvalKey({
   listingId: listed.listingId.toString(),
   evalAesKeyB64,
   contentHash,
+  network: clients.config.network,
 });
 
 // 8. Save both keys to seller keystore
@@ -710,7 +711,7 @@ let evalData: { teasers: any[]; qualityMetrics: any; contentSummary: any } = {
 
 if (encryptedEvalCID) {
   // New flow: encrypted eval preview
-  const capsule = await fetchEvalCapsule(LISTING_ID.toString()) as KeyCapsuleV1 | null;
+  const capsule = await fetchEvalCapsule(LISTING_ID.toString(), clients.config.network) as KeyCapsuleV1 | null;
   if (capsule) {
     const keyMaterialPt = openKeyCapsule({
       capsule,
