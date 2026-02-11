@@ -14,3 +14,7 @@ remappings = [
   "forge-std/=lib/forge-std/src/",
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
 ]
+
+[rpc_endpoints]
+base-sepolia = "https://sepolia.base.org"
+monad-testnet = "https://testnet-rpc.monad.xyz"

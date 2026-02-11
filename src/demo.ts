@@ -2,11 +2,9 @@ import fs from "node:fs/promises";
 
 import dotenv from "dotenv";
 import { encodeFunctionData, toHex, type Hex } from "viem";
-import { baseSepolia } from "viem/chains";
 
 import type { ExtractionSpec, KeyCapsuleV1, MemoryPackage } from "./types.js";
 import {
-  MEMONEX_MARKET,
   MEMONEX_MARKET_ABI,
   createClients,
   formatUsdc,
@@ -97,7 +95,8 @@ async function main(): Promise<void> {
   const buyer = createClients(asHexPrivateKey(buyerPkRaw));
 
   console.log("Memonex demo starting…");
-  console.log("  market:", MEMONEX_MARKET);
+  console.log("  network:", seller.config.network);
+  console.log("  market:", seller.config.addresses.market);
   console.log("  seller:", seller.address);
   console.log("  buyer:", buyer.address);
 
@@ -271,8 +270,8 @@ async function main(): Promise<void> {
   console.log("Attempting self-buy (should revert)…");
   try {
     const selfBuyTx = await seller.walletClient.sendTransaction({
-      chain: baseSepolia,
-      to: MEMONEX_MARKET,
+      chain: seller.config.chain,
+      to: seller.config.addresses.market,
       data: encodeFunctionData({
         abi: MEMONEX_MARKET_ABI,
         functionName: "reserve",

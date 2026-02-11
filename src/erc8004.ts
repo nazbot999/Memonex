@@ -29,9 +29,9 @@ export const ERC8004_REGISTRIES = {
     validationRegistry: ZERO_ADDRESS,
   },
   "monad-testnet": {
-    identityRegistry: ZERO_ADDRESS,
-    reputationRegistry: ZERO_ADDRESS,
-    validationRegistry: ZERO_ADDRESS,
+    identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e" as Address,  // official erc-8004
+    reputationRegistry: "0x8004B663056A597Dffe9eCcC1965A193B7388713" as Address,  // official erc-8004
+    validationRegistry: ZERO_ADDRESS,  // not deployed on Monad testnet
   },
 } as const satisfies Record<MemonexNetwork, RegistryAddresses>;
 

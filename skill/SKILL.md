@@ -134,18 +134,24 @@ First-time setup. Run this once before using any other command.
 
 1. Check if `$MEMONEX_HOME/.env` exists.
 
-2. If not, ask the user for their **Base Sepolia private key** (or offer to generate a new wallet).
+2. **Ask which network to use:**
 
-3. Write the `.env` file (derive `OPENCLAW_ROOT` from `$MEMONEX_HOME`'s parent directory):
+   > **[1] Base Sepolia (recommended)** — Ethereum L2 testnet. Needs Base Sepolia ETH for gas + test USDC.
+   >
+   > **[2] Monad Testnet** — Monad EVM testnet. Needs MON for gas + test USDC. ERC-8004 agent identity available.
+
+3. Ask the user for their **private key** (or offer to generate a new wallet).
+
+4. Write the `.env` file (derive `OPENCLAW_ROOT` from `$MEMONEX_HOME`'s parent directory):
    ```
    OPENCLAW_ROOT=<parent_directory_of_MEMONEX_HOME>
    MEMONEX_PRIVATE_KEY=<their_key>
-   MEMONEX_NETWORK=base-sepolia
+   MEMONEX_NETWORK=<base-sepolia|monad-testnet>
    MEMONEX_AGENT_NAME=<their_agent_name_or_default_OpenClaw>
    ```
    If the `.env` file already exists and already has `OPENCLAW_ROOT`, preserve the existing value.
 
-4. Ask the user to choose their **workflow approval mode**:
+5. Ask the user to choose their **workflow approval mode**:
 
    > **[1] Full control (recommended)** — You'll review privacy scan results, see the buyer preview, and approve before anything goes on-chain. Best for: first-time sellers, sensitive content.
    >
@@ -153,9 +159,9 @@ First-time setup. Run this once before using any other command.
 
    Write `MEMONEX_APPROVAL_MODE=manual` (for option 1) or `MEMONEX_APPROVAL_MODE=auto` (for option 2) to the `.env` file.
 
-5. Run `cd $MEMONEX_HOME && npm install` if `node_modules/` doesn't exist.
+6. Run `cd $MEMONEX_HOME && npm install` if `node_modules/` doesn't exist.
 
-6. Verify the setup works by running this script:
+7. Verify the setup works by running this script:
 
 ```typescript
 import dotenv from "dotenv";
@@ -171,10 +177,12 @@ console.log(JSON.stringify({
 }));
 ```
 
-7. Tell the user:
+8. Tell the user:
    - Their wallet address (from the script output)
-   - Their approval mode (manual or auto)
-   - They need Base Sepolia test USDC to trade (faucet: https://faucet.circle.com/)
+   - Their selected network and approval mode (manual or auto)
+   - Network-specific faucet info:
+     - **Base Sepolia**: Test USDC faucet: https://faucet.circle.com/ — also need Base Sepolia ETH for gas
+     - **Monad Testnet**: MON faucet: https://faucet.monad.xyz — test USDC faucet: https://faucet.circle.com/
    - They can now use `/memonex sell` or `/memonex browse`
 
 **No extra setup needed for storage.** All uploads go through Memonex's IPFS relay automatically.
@@ -1315,12 +1323,17 @@ There is **no** `.cat()`, `.get()`, `.add()`, or `.pin()` method. Always use `fe
 
 ## Network Configuration
 
-| Setting | Testnet (default) | Mainnet |
-|---------|-------------------|---------|
-| Network | `base-sepolia` | `base` |
-| USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | Mainnet USDC |
-| Market | `0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C` | TBD |
-| Faucet | https://faucet.circle.com/ | N/A |
+| Setting | Base Sepolia (default) | Monad Testnet | Base Mainnet |
+|---------|------------------------|---------------|--------------|
+| Network | `base-sepolia` | `monad-testnet` | `base` |
+| Chain ID | 84532 | 10143 | 8453 |
+| USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | `0x534b2f3A21130d7a60830c2Df862319e593943A3` | Mainnet USDC |
+| Market | `0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C` | `0xebF06c0d8fAbd4981847496D4CE50fAEeb902016` | TBD |
+| ERC-8004 | nuwa-protocol registries | Official erc-8004 registries | TBD |
+| Gas token | ETH | MON | ETH |
+| Gas faucet | Bridge for ETH | https://faucet.monad.xyz | N/A |
+| USDC faucet | https://faucet.circle.com/ | https://faucet.circle.com/ | N/A |
+| Explorer | https://sepolia.basescan.org | https://testnet.monadscan.com | https://basescan.org |
 
 ---
 

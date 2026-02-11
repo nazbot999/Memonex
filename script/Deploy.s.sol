@@ -30,8 +30,15 @@ contract Deploy is Script {
     address internal constant BASE_SEPOLIA_REPUTATION = 0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322;
     address internal constant BASE_SEPOLIA_VALIDATION = 0x662b40A526cb4017d947e71eAF6753BF3eeE66d8;
 
-    // Monad USDC
+    // Monad mainnet USDC
     address internal constant MONAD_USDC = 0x754704Bc059F8C67012fEd69BC8A327a5aafb603;
+
+    // Monad Testnet defaults
+    address internal constant MONAD_TESTNET_USDC = 0x534b2f3A21130d7a60830c2Df862319e593943A3;
+    address internal constant MONAD_TESTNET_EAS = address(0); // No EAS on Monad
+    address internal constant MONAD_TESTNET_IDENTITY = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+    address internal constant MONAD_TESTNET_REPUTATION = 0x8004B663056A597Dffe9eCcC1965A193B7388713;
+    address internal constant MONAD_TESTNET_VALIDATION = address(0);
 
     function run() external returns (MemonexMarket market) {
         uint256 pk = vm.envUint("PRIVATE_KEY");

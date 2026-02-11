@@ -143,6 +143,7 @@ export async function storeEvalKey(params: {
   listingId: string;
   evalAesKeyB64: string;
   contentHash: string;
+  network?: string;
 }): Promise<void> {
   const relayUrl = getRelayUrl();
   const res = await fetch(`${relayUrl}/eval-key`, {
@@ -157,9 +158,10 @@ export async function storeEvalKey(params: {
 }
 
 /** Fetch a sealed eval key capsule from the relay (available after reserve()). */
-export async function fetchEvalCapsule(listingId: string): Promise<unknown | null> {
+export async function fetchEvalCapsule(listingId: string, network?: string): Promise<unknown | null> {
   const relayUrl = getRelayUrl();
-  const res = await fetch(`${relayUrl}/eval-capsule/${listingId}`);
+  const params = network ? `?network=${encodeURIComponent(network)}` : "";
+  const res = await fetch(`${relayUrl}/eval-capsule/${listingId}${params}`);
   if (res.status === 404 || res.status === 403) return null;
   if (!res.ok) {
     const text = await res.text().catch(() => "");

@@ -6,22 +6,26 @@ import {
   formatUnits,
   toHex,
   type Address,
+  type Chain,
   type Hex,
   type PublicClient,
   type WalletClient,
   type Transport,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { baseSepolia } from "viem/chains";
 
-import { resolveMemonexConfig } from "./config.js";
+import { resolveMemonexConfig, type MemonexChainConfig } from "./config.js";
 import { createFallbackTransport } from "./transport.js";
 import type { ListingTupleV2, SellerStatsV2 } from "./types.js";
 
+/** @deprecated Use `clients.config.chainId` instead. */
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 
+/** @deprecated Use `clients.config.addresses.market` instead. */
 export const MEMONEX_MARKET = "0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C" as const satisfies Address;
+/** @deprecated Use `clients.config.addresses.usdc` instead. */
 export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const satisfies Address;
+/** @deprecated Use `clients.config.addresses.eas` instead. */
 export const EAS_BASE_SEPOLIA = "0x4200000000000000000000000000000000000021" as const satisfies Address;
 
 // Full ABI matching deployed MemonexMarket contract.
@@ -302,9 +306,10 @@ export const ERC20_ABI = [
 type WalletAccount = ReturnType<typeof privateKeyToAccount>;
 
 export type Clients = {
-  publicClient: PublicClient<Transport, typeof baseSepolia>;
-  walletClient: WalletClient<Transport, typeof baseSepolia, WalletAccount>;
+  publicClient: PublicClient<Transport, Chain>;
+  walletClient: WalletClient<Transport, Chain, WalletAccount>;
   address: Address;
+  config: MemonexChainConfig;
 };
 
 export type ListingTuple = ListingTupleV2;
@@ -341,10 +346,10 @@ export function createClients(privateKey: Hex): Clients {
   const config = resolveMemonexConfig();
   const transport = createFallbackTransport(config);
 
-  const publicClient = createPublicClient({ chain: baseSepolia, transport });
-  const walletClient = createWalletClient({ chain: baseSepolia, transport, account });
+  const publicClient = createPublicClient({ chain: config.chain, transport });
+  const walletClient = createWalletClient({ chain: config.chain, transport, account });
 
-  return { publicClient, walletClient, address: account.address };
+  return { publicClient, walletClient, address: account.address, config };
 }
 
 export async function ensureUsdcAllowance(params: {
@@ -353,8 +358,11 @@ export async function ensureUsdcAllowance(params: {
   spender: Address;
   amount: bigint;
 }): Promise<void> {
+  const usdcAddress = params.clients.config.addresses.usdc;
+  const chain = params.clients.config.chain;
+
   const allowance = (await params.clients.publicClient.readContract({
-    address: USDC_BASE_SEPOLIA,
+    address: usdcAddress,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: [params.owner, params.spender],
@@ -363,8 +371,8 @@ export async function ensureUsdcAllowance(params: {
   if (allowance >= params.amount) return;
 
   const hash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: USDC_BASE_SEPOLIA,
+    chain,
+    address: usdcAddress,
     abi: ERC20_ABI,
     functionName: "approve",
     args: [params.spender, params.amount],
@@ -375,7 +383,7 @@ export async function ensureUsdcAllowance(params: {
 
 export async function getListing(params: { clients: Clients; listingId: bigint }): Promise<ListingTuple> {
   const l = (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getListing",
     args: [params.listingId],
@@ -386,7 +394,7 @@ export async function getListing(params: { clients: Clients; listingId: bigint }
 
 export async function getActiveListingIds(params: { clients: Clients }): Promise<bigint[]> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getActiveListingIds",
     args: [],
@@ -404,8 +412,11 @@ export async function listMemory(params: {
   prevListingId?: bigint;
   discountBps?: number;
 }): Promise<{ listingId: bigint; txHash: Hex }> {
+  const marketAddress = params.clients.config.addresses.market;
+  const chain = params.clients.config.chain;
+
   const sim = await params.clients.publicClient.simulateContract({
-    address: MEMONEX_MARKET,
+    address: marketAddress,
     abi: MEMONEX_MARKET_ABI,
     functionName: "listMemory",
     args: [
@@ -422,25 +433,28 @@ export async function listMemory(params: {
   });
 
   const { account: _simAccount, ...request } = sim.request;
-  const txHash = await params.clients.walletClient.writeContract({ ...request, chain: baseSepolia });
+  const txHash = await params.clients.walletClient.writeContract({ ...request, chain });
   await params.clients.publicClient.waitForTransactionReceipt({ hash: txHash });
 
   return { listingId: sim.result as bigint, txHash };
 }
 
 export async function reserve(params: { clients: Clients; listingId: bigint; buyerPubKey: Uint8Array }): Promise<Hex> {
+  const marketAddress = params.clients.config.addresses.market;
+  const chain = params.clients.config.chain;
+
   const listing = await getListing({ clients: params.clients, listingId: params.listingId });
   const approvalAmount = listing.price; // approve total upfront to cover reserve + confirm
   await ensureUsdcAllowance({
     clients: params.clients,
     owner: params.clients.address,
-    spender: MEMONEX_MARKET,
+    spender: marketAddress,
     amount: approvalAmount,
   });
 
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain,
+    address: marketAddress,
     abi: MEMONEX_MARKET_ABI,
     functionName: "reserve",
     args: [params.listingId, toHex(params.buyerPubKey)],
@@ -450,19 +464,22 @@ export async function reserve(params: { clients: Clients; listingId: bigint; buy
 }
 
 export async function confirm(params: { clients: Clients; listingId: bigint }): Promise<Hex> {
+  const marketAddress = params.clients.config.addresses.market;
+  const chain = params.clients.config.chain;
+
   const listing = await getListing({ clients: params.clients, listingId: params.listingId });
   const remainder = listing.salePrice - listing.evalFeePaid;
 
   await ensureUsdcAllowance({
     clients: params.clients,
     owner: params.clients.address,
-    spender: MEMONEX_MARKET,
+    spender: marketAddress,
     amount: remainder,
   });
 
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain,
+    address: marketAddress,
     abi: MEMONEX_MARKET_ABI,
     functionName: "confirm",
     args: [params.listingId],
@@ -473,8 +490,8 @@ export async function confirm(params: { clients: Clients; listingId: bigint }): 
 
 export async function cancel(params: { clients: Clients; listingId: bigint }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "cancel",
     args: [params.listingId],
@@ -485,8 +502,8 @@ export async function cancel(params: { clients: Clients; listingId: bigint }): P
 
 export async function deliver(params: { clients: Clients; listingId: bigint; deliveryRef: string }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "deliver",
     args: [params.listingId, params.deliveryRef],
@@ -497,8 +514,8 @@ export async function deliver(params: { clients: Clients; listingId: bigint; del
 
 export async function withdraw(params: { clients: Clients; amount: bigint }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "withdraw",
     args: [params.amount],
@@ -509,7 +526,7 @@ export async function withdraw(params: { clients: Clients; amount: bigint }): Pr
 
 export async function getWithdrawableBalance(params: { clients: Clients; account: Address }): Promise<bigint> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "balanceOf",
     args: [params.account],
@@ -518,7 +535,7 @@ export async function getWithdrawableBalance(params: { clients: Clients; account
 
 export async function getSellerStats(params: { clients: Clients; seller: Address }): Promise<SellerStatsV2> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getSellerStats",
     args: [params.seller],
@@ -532,8 +549,8 @@ export function computeAverageRating(stats: SellerStatsV2): number {
 
 export async function rateSeller(params: { clients: Clients; listingId: bigint; rating: number }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "rateSeller",
     args: [params.listingId, params.rating],
@@ -544,8 +561,8 @@ export async function rateSeller(params: { clients: Clients; listingId: bigint; 
 
 export async function cancelListing(params: { clients: Clients; listingId: bigint }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "cancelListing",
     args: [params.listingId],
@@ -556,8 +573,8 @@ export async function cancelListing(params: { clients: Clients; listingId: bigin
 
 export async function expireReserve(params: { clients: Clients; listingId: bigint }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "expireReserve",
     args: [params.listingId],
@@ -568,8 +585,8 @@ export async function expireReserve(params: { clients: Clients; listingId: bigin
 
 export async function claimRefund(params: { clients: Clients; listingId: bigint }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "claimRefund",
     args: [params.listingId],
@@ -580,7 +597,7 @@ export async function claimRefund(params: { clients: Clients; listingId: bigint 
 
 export async function getSellerListings(params: { clients: Clients; seller: Address }): Promise<bigint[]> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getSellerListings",
     args: [params.seller],
@@ -589,7 +606,7 @@ export async function getSellerListings(params: { clients: Clients; seller: Addr
 
 export async function getBuyerPurchases(params: { clients: Clients; buyer: Address }): Promise<bigint[]> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getBuyerPurchases",
     args: [params.buyer],
@@ -598,7 +615,7 @@ export async function getBuyerPurchases(params: { clients: Clients; buyer: Addre
 
 export async function getVersionHistory(params: { clients: Clients; listingId: bigint }): Promise<bigint[]> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getVersionHistory",
     args: [params.listingId],
@@ -607,7 +624,7 @@ export async function getVersionHistory(params: { clients: Clients; listingId: b
 
 export async function getSellerAgentId(params: { clients: Clients; seller: Address }): Promise<bigint> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getSellerAgentId",
     args: [params.seller],
@@ -620,7 +637,7 @@ export async function getSellerReputation(params: { clients: Clients; seller: Ad
   summaryValueDecimals: number;
 }> {
   const result = await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getSellerReputation",
     args: [params.seller],
@@ -634,7 +651,7 @@ export async function getSellerValidationSummary(params: { clients: Clients; sel
   averageResponse: bigint;
 }> {
   const result = await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getSellerValidationSummary",
     args: [params.seller],
@@ -645,7 +662,7 @@ export async function getSellerValidationSummary(params: { clients: Clients; sel
 
 export async function getValidationRequestHash(params: { clients: Clients; listingId: bigint }): Promise<`0x${string}`> {
   return (await params.clients.publicClient.readContract({
-    address: MEMONEX_MARKET,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "getValidationRequestHash",
     args: [params.listingId],
@@ -653,8 +670,11 @@ export async function getValidationRequestHash(params: { clients: Clients; listi
 }
 
 export async function registerSeller(params: { clients: Clients; agentURI: string }): Promise<bigint> {
+  const marketAddress = params.clients.config.addresses.market;
+  const chain = params.clients.config.chain;
+
   const sim = await params.clients.publicClient.simulateContract({
-    address: MEMONEX_MARKET,
+    address: marketAddress,
     abi: MEMONEX_MARKET_ABI,
     functionName: "registerSeller",
     args: [params.agentURI],
@@ -662,15 +682,15 @@ export async function registerSeller(params: { clients: Clients; agentURI: strin
   });
 
   const { account: _simAccount, ...request } = sim.request;
-  const txHash = await params.clients.walletClient.writeContract({ ...request, chain: baseSepolia });
+  const txHash = await params.clients.walletClient.writeContract({ ...request, chain });
   await params.clients.publicClient.waitForTransactionReceipt({ hash: txHash });
   return sim.result as bigint;
 }
 
 export async function updateDiscountBps(params: { clients: Clients; listingId: bigint; newBps: number }): Promise<Hex> {
   const txHash = await params.clients.walletClient.writeContract({
-    chain: baseSepolia,
-    address: MEMONEX_MARKET,
+    chain: params.clients.config.chain,
+    address: params.clients.config.addresses.market,
     abi: MEMONEX_MARKET_ABI,
     functionName: "updateDiscountBps",
     args: [params.listingId, params.newBps],

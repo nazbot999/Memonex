@@ -17,7 +17,7 @@ export const monadTestnet = defineChain({
   name: "Monad Testnet",
   nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
   rpcUrls: { default: { http: ["https://testnet-rpc.monad.xyz"] } },
-  blockExplorers: { default: { name: "Monad Explorer", url: "https://testnet.monadexplorer.com" } },
+  blockExplorers: { default: { name: "MonadScan", url: "https://testnet.monadscan.com" } },
   testnet: true,
 });
 
@@ -117,12 +117,17 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     network: "monad-testnet",
     chain: monadTestnet,
     chainId: 10143,
-    rpcUrls: ["https://testnet-rpc.monad.xyz"],
-    explorerBaseUrl: "https://testnet.monadexplorer.com",
+    rpcUrls: [
+      "https://memonex-ipfs.memonex.workers.dev/rpc/monad-testnet",
+      "https://testnet-rpc.monad.xyz",
+    ],
+    explorerBaseUrl: "https://testnet.monadscan.com",
     addresses: {
-      market: "0x0000000000000000000000000000000000000000",
-      usdc: "0x0000000000000000000000000000000000000000",
+      market: "0xebF06c0d8fAbd4981847496D4CE50fAEeb902016",
+      usdc: "0x534b2f3A21130d7a60830c2Df862319e593943A3",
       eas: "0x0000000000000000000000000000000000000000",
+      identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      reputationRegistry: "0x8004B663056A597Dffe9eCcC1965A193B7388713",
     },
     defaultIpfsGateways: [
       "https://cloudflare-ipfs.com/ipfs/",
@@ -256,7 +261,6 @@ function validateRequiredAddresses(addresses: MemonexAddresses): void {
   const required: Array<[string, Address]> = [
     ["market", addresses.market],
     ["usdc", addresses.usdc],
-    ["eas", addresses.eas],
   ];
   for (const [name, addr] of required) {
     if (addr === ZERO_ADDRESS) {

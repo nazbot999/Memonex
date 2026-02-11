@@ -95,9 +95,9 @@ test/
   MemonexMarket.t.sol  33 Foundry tests covering the full protocol flow
 ```
 
-## Smart Contract
+## Smart Contracts
 
-**Network:** Base Sepolia
+### Base Sepolia
 
 | Contract | Address |
 |----------|---------|
@@ -107,6 +107,17 @@ test/
 | ERC-8004 Identity | [`0x7177a6867296406881E20d6647232314736Dd09A`](https://sepolia.basescan.org/address/0x7177a6867296406881E20d6647232314736Dd09A) |
 | ERC-8004 Reputation | [`0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322`](https://sepolia.basescan.org/address/0xB5048e3ef1DA4E04deB6f7d0423D06F63869e322) |
 | ERC-8004 Validation | [`0x662b40A526cb4017d947e71eAF6753BF3eeE66d8`](https://sepolia.basescan.org/address/0x662b40A526cb4017d947e71eAF6753BF3eeE66d8) |
+
+### Monad Testnet
+
+| Contract | Address |
+|----------|---------|
+| MemonexMarket | [`0xebF06c0d8fAbd4981847496D4CE50fAEeb902016`](https://testnet.monadscan.com/address/0xebF06c0d8fAbd4981847496D4CE50fAEeb902016) |
+| USDC (testnet) | `0x534b2f3A21130d7a60830c2Df862319e593943A3` |
+| EAS | N/A (not deployed on Monad) |
+| ERC-8004 Identity | [`0x8004A818BFB912233c491871b3d84c89A494BD9e`](https://testnet.monadscan.com/address/0x8004A818BFB912233c491871b3d84c89A494BD9e) |
+| ERC-8004 Reputation | [`0x8004B663056A597Dffe9eCcC1965A193B7388713`](https://testnet.monadscan.com/address/0x8004B663056A597Dffe9eCcC1965A193B7388713) |
+| ERC-8004 Validation | N/A (not deployed on Monad) |
 
 ### Key Features
 
@@ -142,7 +153,7 @@ CONFIRMED -> claimRefund(id) [6h]     -> REFUNDED (100% to buyer, anyone can cal
 
 ## ERC-8004: Agent Identity & Reputation
 
-Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethereum standard for AI agent identity, using live registries deployed on Base Sepolia by [nuwa-protocol](https://github.com/nuwa-protocol/nuwa-8004).
+Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethereum standard for AI agent identity, using live registries on Base Sepolia ([nuwa-protocol](https://github.com/nuwa-protocol/nuwa-8004)) and Monad Testnet ([official erc-8004](https://github.com/erc-8004/erc-8004-contracts)).
 
 **How it works — zero friction for users:**
 
@@ -151,7 +162,7 @@ Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethe
 - **Validation** — Every delivery is automatically recorded in the Validation Registry. The marketplace self-attests each delivery with a deterministic request/response hash.
 - **Trust Scores** — Composite score combining reputation (60%) and validation history (40%), visible on every listing in the marketplace.
 
-All ERC-8004 features are **best-effort** — if registries are unavailable (e.g., Monad where they aren't deployed yet), the marketplace works identically without them.
+All ERC-8004 features are **best-effort** — if registries are unavailable on a network, the marketplace works identically without them. Both Base Sepolia and Monad Testnet have full ERC-8004 identity and reputation support.
 
 | Registry | What it does | When it's called |
 |----------|-------------|-----------------|
