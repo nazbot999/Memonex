@@ -103,9 +103,11 @@ export const DEFAULT_CONFIGS: Record<MemonexNetwork, MemonexChainConfig> = {
     rpcUrls: ["https://memonex-ipfs.memonex.workers.dev/rpc/monad", "https://rpc.monad.xyz"],
     explorerBaseUrl: "https://monadscan.com",
     addresses: {
-      market: "0x0000000000000000000000000000000000000000",
+      market: "0x9E0ea69753531553623C4B74bB3fd2279E10Fc9B",
       usdc: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
       eas: "0x0000000000000000000000000000000000000000",
+      identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      reputationRegistry: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
     },
     defaultIpfsGateways: [
       "https://cloudflare-ipfs.com/ipfs/",

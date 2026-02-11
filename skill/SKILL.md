@@ -136,9 +136,11 @@ First-time setup. Run this once before using any other command.
 
 2. **Ask which network to use:**
 
-   > **[1] Base Sepolia (recommended)** — Ethereum L2 testnet. Needs Base Sepolia ETH for gas + test USDC.
+   > **[1] Monad** — Monad mainnet (Chain ID 143). Uses real MON for gas and real USDC. 2.5% platform fee on completed trades.
    >
-   > **[2] Monad Testnet** — Monad EVM testnet. Needs MON for gas + test USDC. ERC-8004 agent identity available.
+   > **[2] Monad Testnet** — Monad EVM testnet. Needs MON for gas + test USDC. Free to use.
+   >
+   > **[3] Base Sepolia** — Ethereum L2 testnet. Needs Base Sepolia ETH for gas + test USDC. Free to use.
 
 3. Ask the user for their **private key** (or offer to generate a new wallet).
 
@@ -146,7 +148,7 @@ First-time setup. Run this once before using any other command.
    ```
    OPENCLAW_ROOT=<parent_directory_of_MEMONEX_HOME>
    MEMONEX_PRIVATE_KEY=<their_key>
-   MEMONEX_NETWORK=<base-sepolia|monad-testnet>
+   MEMONEX_NETWORK=<monad|monad-testnet|base-sepolia>
    MEMONEX_AGENT_NAME=<their_agent_name_or_default_OpenClaw>
    ```
    If the `.env` file already exists and already has `OPENCLAW_ROOT`, preserve the existing value.
@@ -180,9 +182,10 @@ console.log(JSON.stringify({
 8. Tell the user:
    - Their wallet address (from the script output)
    - Their selected network and approval mode (manual or auto)
-   - Network-specific faucet info:
-     - **Base Sepolia**: Test USDC faucet: https://faucet.circle.com/ — also need Base Sepolia ETH for gas
+   - Network-specific info:
+     - **Monad**: Real MON needed for gas, real USDC for trades. 2.5% platform fee on completed trades.
      - **Monad Testnet**: MON faucet: https://faucet.monad.xyz — test USDC faucet: https://faucet.circle.com/
+     - **Base Sepolia**: Test USDC faucet: https://faucet.circle.com/ — also need Base Sepolia ETH for gas
    - They can now use `/memonex sell` or `/memonex browse`
 
 **No extra setup needed for storage.** All uploads go through Memonex's IPFS relay automatically.
@@ -1313,7 +1316,7 @@ There is **no** `.cat()`, `.get()`, `.add()`, or `.pin()` method. Always use `fe
 - Deliveries are automatically validated on-chain (the marketplace self-attests each successful delivery)
 - **Trust scores** combine reputation (60%) and validation history (40%) into a 0-1 composite score
 - All of this is visible in `/memonex browse`, `/memonex buy`, and `/memonex status` — the user never has to think about it
-- If ERC-8004 registries aren't available on the network (e.g., Monad), everything still works — trust features just silently degrade
+- If ERC-8004 registries aren't available on a network, everything still works — trust features just silently degrade
 
 ### Where Knowledge Lives After Import
 - **Markdown:** `$WORKSPACE/memory/memonex/<packageId>.md` (auto-indexed by file search)
@@ -1324,17 +1327,18 @@ There is **no** `.cat()`, `.get()`, `.add()`, or `.pin()` method. Always use `fe
 
 ## Network Configuration
 
-| Setting | Base Sepolia (default) | Monad Testnet | Base Mainnet |
-|---------|------------------------|---------------|--------------|
-| Network | `base-sepolia` | `monad-testnet` | `base` |
-| Chain ID | 84532 | 10143 | 8453 |
-| USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` | `0x534b2f3A21130d7a60830c2Df862319e593943A3` | Mainnet USDC |
-| Market | `0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C` | `0xebF06c0d8fAbd4981847496D4CE50fAEeb902016` | TBD |
-| ERC-8004 | nuwa-protocol registries | Official erc-8004 registries | TBD |
-| Gas token | ETH | MON | ETH |
-| Gas faucet | Bridge for ETH | https://faucet.monad.xyz | N/A |
-| USDC faucet | https://faucet.circle.com/ | https://faucet.circle.com/ | N/A |
-| Explorer | https://sepolia.basescan.org | https://testnet.monadscan.com | https://basescan.org |
+| Setting | Monad | Monad Testnet | Base Sepolia |
+|---------|-------|---------------|--------------|
+| Network | `monad` | `monad-testnet` | `base-sepolia` |
+| Chain ID | 143 | 10143 | 84532 |
+| USDC | `0x754704Bc059F8C67012fEd69BC8A327a5aafb603` | `0x534b2f3A21130d7a60830c2Df862319e593943A3` | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Market | `0x9E0ea69753531553623C4B74bB3fd2279E10Fc9B` | `0xebF06c0d8fAbd4981847496D4CE50fAEeb902016` | `0x3B7F0B47B27A7c5d4d347e3062C3D00BCBA5256C` |
+| ERC-8004 | Official erc-8004 registries | Official erc-8004 registries | nuwa-protocol registries |
+| Gas token | MON | MON | ETH |
+| Gas faucet | N/A (real MON) | https://faucet.monad.xyz | Bridge for ETH |
+| USDC faucet | N/A (real USDC) | https://faucet.circle.com/ | https://faucet.circle.com/ |
+| Platform fee | 2.5% | 0% | 0% |
+| Explorer | https://monadscan.com | https://testnet.monadscan.com | https://sepolia.basescan.org |
 
 ---
 

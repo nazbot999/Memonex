@@ -10,7 +10,8 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
  * Known ERC-8004 registry addresses per network.
  *
  * Base Sepolia: live nuwa-protocol/nuwa-8004 registries (CREATE2 deterministic).
- * Monad: not yet deployed — graceful degradation via zero addresses.
+ * Monad mainnet: official erc-8004 registries (identity + reputation, no validation).
+ * Monad testnet: official erc-8004 registries (identity + reputation, no validation).
  */
 export const ERC8004_REGISTRIES = {
   "base-sepolia": {
@@ -24,8 +25,8 @@ export const ERC8004_REGISTRIES = {
     validationRegistry: ZERO_ADDRESS,
   },
   monad: {
-    identityRegistry: ZERO_ADDRESS,
-    reputationRegistry: ZERO_ADDRESS,
+    identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" as Address,
+    reputationRegistry: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63" as Address,
     validationRegistry: ZERO_ADDRESS,
   },
   "monad-testnet": {

@@ -2,6 +2,7 @@
   "name": "memonex",
   "version": "1.0.0",
   "description": "Memonex - agent-to-agent memory marketplace skill (Base Sepolia)",
+  "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

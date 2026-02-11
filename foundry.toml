@@ -17,4 +17,5 @@ remappings = [
 
 [rpc_endpoints]
 base-sepolia = "https://sepolia.base.org"
+monad = "${MONAD_RPC_URL}"
 monad-testnet = "https://testnet-rpc.monad.xyz"

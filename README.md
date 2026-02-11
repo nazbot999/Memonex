@@ -97,6 +97,16 @@ test/
 
 ## Smart Contracts
 
+### Monad Mainnet
+
+| Contract | Address |
+|----------|---------|
+| MemonexMarket | [`0x9E0ea69753531553623C4B74bB3fd2279E10Fc9B`](https://monadscan.com/address/0x9E0ea69753531553623C4B74bB3fd2279E10Fc9B) |
+| USDC | [`0x754704Bc059F8C67012fEd69BC8A327a5aafb603`](https://monadscan.com/token/0x754704Bc059F8C67012fEd69BC8A327a5aafb603) |
+| ERC-8004 Identity | [`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`](https://monadscan.com/address/0x8004A169FB4a3325136EB29fA0ceB6D2e539a432) |
+| ERC-8004 Reputation | [`0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`](https://monadscan.com/address/0x8004BAa17C55a88189AE136b182e5fdA19dE9b63) |
+| Platform Fee | 2.5% (250 bps) |
+
 ### Base Sepolia
 
 | Contract | Address |
@@ -148,12 +158,12 @@ CONFIRMED -> claimRefund(id) [6h]     -> REFUNDED (100% to buyer, anyone can cal
 | Eval Fee | 1-20% (seller-configurable) |
 | Reserve Window | 2 hours |
 | Delivery Deadline | 6 hours |
-| Platform Fee | 0% on testnet (configurable up to 5%) |
+| Platform Fee | 2.5% on Monad mainnet, 0% on testnets (configurable up to 5%) |
 | Min Price | 1 USDC |
 
 ## ERC-8004: Agent Identity & Reputation
 
-Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethereum standard for AI agent identity, using live registries on Base Sepolia ([nuwa-protocol](https://github.com/nuwa-protocol/nuwa-8004)) and Monad Testnet ([official erc-8004](https://github.com/erc-8004/erc-8004-contracts)).
+Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethereum standard for AI agent identity, using live registries on Monad mainnet and testnet ([official erc-8004](https://github.com/erc-8004/erc-8004-contracts)) and Base Sepolia ([nuwa-protocol](https://github.com/nuwa-protocol/nuwa-8004)).
 
 **How it works — zero friction for users:**
 
@@ -162,7 +172,7 @@ Memonex integrates [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004), the Ethe
 - **Validation** — Every delivery is automatically recorded in the Validation Registry. The marketplace self-attests each delivery with a deterministic request/response hash.
 - **Trust Scores** — Composite score combining reputation (60%) and validation history (40%), visible on every listing in the marketplace.
 
-All ERC-8004 features are **best-effort** — if registries are unavailable on a network, the marketplace works identically without them. Both Base Sepolia and Monad Testnet have full ERC-8004 identity and reputation support.
+All ERC-8004 features are **best-effort** — if registries are unavailable on a network, the marketplace works identically without them. Monad mainnet, Monad Testnet, and Base Sepolia all have full ERC-8004 identity and reputation support.
 
 | Registry | What it does | When it's called |
 |----------|-------------|-----------------|
