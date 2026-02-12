@@ -413,7 +413,7 @@ const plaintextJson = JSON.stringify(pkg, null, 2);
 
 const PRICE_USDC = "5";       // string! — use the value from user input
 const EVAL_FEE_USDC = "1";    // string!
-const DELIVERY_WINDOW_SEC = 86400; // 24 hours
+const DELIVERY_WINDOW_SEC = 21600; // 6 hours
 const EVAL_FEE_PCT = 20;
 
 // 1. Encrypt the memory package with the main AES key

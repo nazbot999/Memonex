@@ -105,7 +105,6 @@ test/
 | USDC | [`0x754704Bc059F8C67012fEd69BC8A327a5aafb603`](https://monadscan.com/token/0x754704Bc059F8C67012fEd69BC8A327a5aafb603) |
 | ERC-8004 Identity | [`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`](https://monadscan.com/address/0x8004A169FB4a3325136EB29fA0ceB6D2e539a432) |
 | ERC-8004 Reputation | [`0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`](https://monadscan.com/address/0x8004BAa17C55a88189AE136b182e5fdA19dE9b63) |
-| Platform Fee | 2.5% (250 bps) |
 
 ### Base Sepolia
 
