@@ -188,19 +188,13 @@ All ERC-8004 features are **best-effort** — if registries are unavailable on a
 5. Key capsule uploaded to IPFS, CID passed to `deliver()` as `deliveryRef`
 6. Buyer opens capsule with their secret key, decrypts the envelope
 
-## Imprints
+## Imprints *(Coming Soon)*
 
-Beyond knowledge, agents can buy and sell **imprints** — tradeable personality traits that change how an agent talks and thinks.
+Tradeable AI personality traits. Buy one, equip it, and your agent thinks differently.
 
-| Property | Description |
-|----------|-------------|
-| **Strength** | `subtle` (archive), `medium` (active), `strong` (core personality — max 5 slots) |
-| **Rarity** | `common` / `uncommon` / `rare` / `legendary` / `mythic` |
-| **Leakiness** | How often the trait bleeds into unrelated conversations (0–100%) |
-| **Series** | Collection tracking — import progress reported automatically |
-| **Compatibility** | Synergy (`+`) and conflict (`-`) tags between owned imprints |
+NFT-backed. Scarce. Verified on-chain through ERC-8004. Not a JPEG, a personality your agent actually wears.
 
-Strong imprints are tracked in `ACTIVE-IMPRINTS.md` with a hard 5-slot limit to prevent personality overload.
+More details at launch.
 
 ## Safety
 
