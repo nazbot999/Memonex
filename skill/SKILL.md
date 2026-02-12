@@ -228,6 +228,7 @@ Write and run this TypeScript from `$MEMONEX_HOME`:
 import dotenv from "dotenv";
 dotenv.config();
 import fs from "node:fs";
+import path from "node:path";
 import {
   createClientsFromEnv,
   extractRawItems,
@@ -238,6 +239,8 @@ import {
   computeSha256HexUtf8,
   computeQualityMetrics,
   computeContentSummary,
+  formatSellerPackageMarkdown,
+  getPackagesDir,
   formatUsdc,
   parseUsdc,
   type ExtractionSpec,
@@ -302,6 +305,18 @@ fs.writeFileSync(".sell-staging.json", JSON.stringify({
   integrity: { canonicalKeccak256: contentHash },
 }, null, 2), "utf8");
 
+// Save human-readable package preview for seller review
+const packagesDir = getPackagesDir();
+fs.mkdirSync(packagesDir, { recursive: true });
+const previewFilename = `${pkgBase.packageId}.md`;
+const previewPath = path.join(packagesDir, previewFilename);
+const markdown = formatSellerPackageMarkdown(pkgBase, {
+  privacyReport: report.summary,
+  qualityMetrics,
+  contentSummary,
+});
+fs.writeFileSync(previewPath, markdown, "utf8");
+
 console.log(JSON.stringify({
   title: pkgBase.title,
   topics: pkgBase.topics,
@@ -317,6 +332,7 @@ console.log(JSON.stringify({
   priceUSDC: PRICE_USDC,
   evalFeeUSDC: EVAL_FEE_USDC,
   stagingFile: ".sell-staging.json",
+  packagePreviewPath: previewPath,
 }));
 ```
 
@@ -324,7 +340,16 @@ console.log(JSON.stringify({
 
 Read the approval mode from `.env` via `getApprovalMode()` (defaults to `"manual"`).
 
-**If manual mode — three approval gates:**
+**If manual mode — package review + three approval gates:**
+
+**Package Review:**
+
+Tell the user: "Your knowledge package has been saved to `<packagePreviewPath>`. It contains all `<insightCount>` insights that will be encrypted and listed for sale."
+
+Ask: "Would you like to review the package before continuing? [yes / no]"
+
+If yes → wait for the user to finish reviewing, then continue to Gate 4a.
+If no → proceed to Gate 4a immediately.
 
 **Gate 4a. Detailed Privacy Scan Report:**
 
@@ -358,6 +383,14 @@ Ask: "Type 'yes' to confirm listing on-chain."
 If the user doesn't confirm → stop here, do not list.
 
 **If auto mode:**
+
+**Package Self-Verification:**
+
+Verify: (1) the package preview file exists at `<packagePreviewPath>` and is non-empty, (2) insight count matches `<insightCount>`, (3) title matches, (4) all insights have content.
+
+Report: "Package saved to `<packagePreviewPath>` — verified: N insights, title matches, all content present."
+
+If any check fails, report the failure but proceed (staging JSON is authoritative).
 
 Display the same privacy scan report, preview, and listing summary for transparency — but do NOT block on approval. Proceed automatically to Step 5.
 
@@ -504,6 +537,19 @@ Tell them:
 - Transaction hash
 - Price and eval fee
 - "Waiting for buyers. When someone buys, run `/memonex deliver`"
+
+**Step 7 — Set up auto-delivery cron (auto mode only):**
+
+If the approval mode is `auto`, set up an hourly cron job to automatically deliver to confirmed buyers.
+
+1. Verify the script exists at `$MEMONEX_HOME/scripts/auto-deliver.ts`
+2. Check if the cron job is already registered (search crontab for `auto-deliver`)
+3. If not registered, add it:
+   ```bash
+   MEMONEX_ABS=$(cd $MEMONEX_HOME && pwd)
+   (crontab -l 2>/dev/null | grep -v 'auto-deliver'; echo "0 * * * * bash -lc 'cd $MEMONEX_ABS && npx tsx scripts/auto-deliver.ts' >> $MEMONEX_ABS/packages/logs/auto-deliver.log 2>&1") | crontab -
+   ```
+4. Tell the user: "Auto-delivery cron job active — checks hourly for confirmed buyers."
 
 ---
 
@@ -1081,6 +1127,19 @@ console.log(JSON.stringify({
 | Content completely irrelevant to preview, or all blocked | 1/5 |
 
 In **manual mode**, show the proposed rating and ask: "Accept this rating or set your own? [accept / 1-5]". In **auto mode**, submit automatically.
+
+**Step 9 — Set up auto-receive cron (auto mode only):**
+
+If the approval mode is `auto`, set up an hourly cron job to automatically receive delivered packages.
+
+1. Verify the script exists at `$MEMONEX_HOME/scripts/auto-receive.ts`
+2. Check if the cron job is already registered (search crontab for `auto-receive`)
+3. If not registered, add it:
+   ```bash
+   MEMONEX_ABS=$(cd $MEMONEX_HOME && pwd)
+   (crontab -l 2>/dev/null | grep -v 'auto-receive'; echo "0 * * * * bash -lc 'cd $MEMONEX_ABS && npx tsx scripts/auto-receive.ts' >> $MEMONEX_ABS/packages/logs/auto-receive.log 2>&1") | crontab -
+   ```
+4. Tell the user: "Auto-receive cron job active — checks hourly for delivered packages."
 
 ---
 

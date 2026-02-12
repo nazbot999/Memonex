@@ -76,6 +76,10 @@ export function getGatewayConfigPath(): string {
   return path.join(getOpenclawRoot(), "openclaw.json");
 }
 
+export function getPackagesDir(): string {
+  return path.join(getMemonexHome(), "packages");
+}
+
 export function getMemoryDir(): string {
   return path.join(getWorkspacePath(), "memory");
 }

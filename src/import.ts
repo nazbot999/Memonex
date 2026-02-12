@@ -105,6 +105,75 @@ function formatMarkdown(pkg: MemoryPackage, opts: ImportOptions): string {
   return lines.join("\n");
 }
 
+export function formatSellerPackageMarkdown(
+  pkg: MemoryPackage,
+  opts: {
+    privacyReport?: { secretsRemoved: number; piiRemoved: number; highRiskSegmentsDropped: number };
+    qualityMetrics?: { noveltyScore: number; specificityScore: number; tokenEstimate: number; leakageRiskScore: number };
+    contentSummary?: Record<string, number>;
+  },
+): string {
+  const lines: string[] = [];
+  const date = new Date().toISOString().slice(0, 10);
+
+  lines.push(`# ${pkg.title}`);
+  lines.push("");
+  lines.push(
+    `> Seller package preview | Agent: ${pkg.seller.agentName} | ${date}`,
+  );
+  lines.push(
+    `> Topics: ${pkg.topics.join(", ")} | Audience: ${pkg.audience} | Insights: ${pkg.insights.length}`,
+  );
+  lines.push("");
+
+  if (pkg.description) {
+    lines.push(pkg.description);
+    lines.push("");
+  }
+
+  if (opts.privacyReport) {
+    const pr = opts.privacyReport;
+    lines.push("## Privacy Scan");
+    lines.push(`- Secrets removed: ${pr.secretsRemoved} | PII removed: ${pr.piiRemoved} | High-risk dropped: ${pr.highRiskSegmentsDropped}`);
+    lines.push("");
+  }
+
+  if (opts.qualityMetrics) {
+    const qm = opts.qualityMetrics;
+    lines.push("## Quality Metrics");
+    lines.push(`- Novelty: ${qm.noveltyScore.toFixed(2)} | Specificity: ${qm.specificityScore.toFixed(2)} | Tokens: ~${qm.tokenEstimate} | Leakage risk: ${qm.leakageRiskScore.toFixed(2)}`);
+    lines.push("");
+  }
+
+  lines.push("## Insights");
+  lines.push("");
+
+  for (const insight of pkg.insights) {
+    lines.push(`### ${insight.title}`);
+    lines.push(
+      `**Type:** ${insight.type} | **Confidence:** ${insight.confidence.toFixed(2)} | **Tags:** ${insight.tags.join(", ")}`,
+    );
+    lines.push("");
+    lines.push(insight.content);
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+  }
+
+  lines.push("## Package Metadata");
+  lines.push("");
+  lines.push(`- Package ID: ${pkg.packageId}`);
+  if (pkg.integrity.canonicalKeccak256) {
+    lines.push(`- Content Hash: ${pkg.integrity.canonicalKeccak256}`);
+  }
+  lines.push(
+    `- License: ${pkg.license.terms} — Allowed: ${pkg.license.allowedUse.join(", ")} | Prohibited: ${pkg.license.prohibitedUse.join(", ")}`,
+  );
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 function formatImprintMarkdown(
   pkg: MemoryPackage,
   meta: ImprintMeta | undefined,
