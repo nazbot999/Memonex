@@ -129,8 +129,12 @@ export function encodeKeyMaterialJson(params: { aesKey32: Buffer; contentHash: H
 
 export function decodeKeyMaterialJson(pt: Uint8Array): { aesKey32: Buffer; contentHash: Hex } {
   const s = naclUtil.encodeUTF8(pt);
-  const obj = JSON.parse(s) as { aesKeyB64: string; contentHash: Hex };
-  return { aesKey32: Buffer.from(obj.aesKeyB64, "base64"), contentHash: obj.contentHash };
+  const obj = JSON.parse(s) as { aesKeyB64?: string; evalAesKeyB64?: string; contentHash: Hex };
+  // Accept both field names: aesKeyB64 (delivery capsules via encodeKeyMaterialJson)
+  // and evalAesKeyB64 (eval capsules sealed by the worker relay)
+  const keyB64 = obj.aesKeyB64 ?? obj.evalAesKeyB64;
+  if (!keyB64) throw new Error("Key material JSON missing both aesKeyB64 and evalAesKeyB64");
+  return { aesKey32: Buffer.from(keyB64, "base64"), contentHash: obj.contentHash };
 }
 
 function getKeystorePassphrase(): string | null {
